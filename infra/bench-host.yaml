@@ -17,9 +17,11 @@ Metadata:
 Parameters:
   InstanceType:
     Type: String
-    Default: m7i.2xlarge
-    AllowedValues: [m7i.xlarge, m7i.2xlarge, m7i.4xlarge]
-    Description: 2xlarge = 8 vCPU / 32 GiB, sized for one AIOpsLab app + Prometheus + Jaeger.
+    Default: r7i.xlarge
+    AllowedValues: [r7i.xlarge, m7i.xlarge, m7i.2xlarge, r7i.2xlarge]
+    Description: >-
+      r7i.xlarge = 4 vCPU / 32 GiB. AIOpsLab apps are memory-bound; 4 vCPU also fits a new
+      account's 5-vCPU On-Demand quota. Use a 2xlarge only after a quota increase.
   VolumeSizeGiB:
     Type: Number
     Default: 150
@@ -77,7 +79,7 @@ Resources:
     Type: AWS::EC2::Instance
     Metadata:
       com.aws.cloudformation.Context:
-        why: x86 over Graviton - some AIOpsLab app images may be amd64-only; UserData installs tools only, cluster is created by hand (see Outputs)
+        why: x86 over Graviton - some AIOpsLab app images may be amd64-only; memory-optimised r7i since k8s demo apps are RAM-bound; UserData installs tools only, cluster is created by hand (see Outputs)
         must: [IMDSv2 required, root volume encrypted]
         mutable: free-to-tune
     Properties:
