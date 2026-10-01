@@ -58,7 +58,13 @@ class ReActAgent:
     def step(self, state: str) -> str:
         obs = (state or "Begin.")[:MAX_OBSERVATION_CHARS]
         self.messages.append({"role": "user", "content": obs})
-        reply = llm.chat(self.system, self.messages, temperature=self.temperature)
+        try:
+            reply = llm.chat(self.system, self.messages, temperature=self.temperature)
+        except Exception as e:  # LLM unavailable: fail this problem honestly, keep the run alive
+            call = {"detection": 'submit("No")', "analysis": "submit(None)"}.get(self.task, "submit([])")
+            self._finish(call)
+            self.result["llm_error"] = str(e).splitlines()[-1][:300]
+            return _block(call)
         self.messages.append({"role": "assistant", "content": reply})
         self.steps += 1
         call = _first_code_block(reply)

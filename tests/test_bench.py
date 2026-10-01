@@ -251,3 +251,15 @@ def test_analysis_task_submits_fault_type():
     agent.inv = Investigation([BenchHypothesis("H1", "geo", "Authentication Issue", "Application", "", 1.0)],
                               instances(["geo"]))
     assert agent._submission() == 'submit({"system_level": "Application", "fault_type": "Authentication Issue"})'
+
+
+def test_llm_failure_submits_and_records_error():
+    def broken(*a, **k):
+        raise RuntimeError("json_call: every provider failed\n  401 Unauthorized")
+    agent = VoIAgent("voi", generate=broken)
+    agent.init_context(PROBLEM)
+    asyncio.run(agent.get_action(""))
+    asyncio.run(agent.get_action(SVC_OUT))
+    assert asyncio.run(agent.get_action(PODS_OUT)) == "```\nsubmit([])\n```"
+    assert "401" in agent.result["llm_error"]
+    assert asyncio.run(agent.get_action("anything")) == "```\nsubmit([])\n```"

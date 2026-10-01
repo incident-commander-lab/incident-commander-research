@@ -86,7 +86,10 @@ class VoIAgent:
         if self.phase == "propose":
             self.observations["kubectl get pods"] = state
             self.probes = instances(self.services)
-            self._propose()
+            try:
+                self._propose()
+            except Exception as e:  # LLM unavailable: fail this problem honestly, keep the run alive
+                return self._give_up(e)
             self.phase = "investigate"
             return self._next()
 
@@ -94,10 +97,13 @@ class VoIAgent:
             self.inv.observe(self.pending, self.inv.probes[self.pending].label(state))
             if self.inv.surprise() and self.regenerations < self.max_regenerations:
                 self.regenerations += 1
-                self._propose(findings=[(s.probe, s.outcome) for s in self.inv.steps])
+                try:
+                    self._propose(findings=[(s.probe, s.outcome) for s in self.inv.steps])
+                except Exception as e:  # keep the current hypotheses and carry on
+                    self.gen_meta.append({"regeneration_error": str(e).splitlines()[-1][:200]})
             return self._next()
 
-        return _block(self._submission())  # already submitted; repeat
+        return _block(self.result.get("submission") or self._submission())  # already submitted; repeat
 
     # ------------------------------------------------------------------ #
     def _propose(self, findings=None):
@@ -108,6 +114,17 @@ class VoIAgent:
         self.inv = Investigation(hyps, self.probes, **self.kw)
         for s in old_steps:  # carry evidence over to the new hypothesis set
             self.inv.observe(s.probe, s.outcome)
+
+    def _give_up(self, error: Exception) -> str:
+        """No hypotheses could be generated. Submit the 'nothing found' answer so
+        AIOpsLab scores the problem (as a failure) and runs its fault recovery."""
+        self.phase = "done"
+        call = {"detection": 'submit("No")', "analysis": "submit(None)"}.get(self.task, "submit([])")
+        self.result = {"policy": self.policy, "task": self.task, "submission": call,
+                       "probes_run": 0, "llm_error": str(error).splitlines()[-1][:300],
+                       "llm_usage": dict(llm.USAGE),
+                       "wall_seconds": round(time.monotonic() - self.t0, 2)}
+        return _block(call)
 
     def _next(self) -> str:
         key = self.inv.next_probe()
