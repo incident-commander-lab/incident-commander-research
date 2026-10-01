@@ -42,12 +42,14 @@ class Step:
     outcome: str
     eig: float
     posteriors: dict[str, float]
+    free: bool = False   # read from discovery output, not a probe the agent paid for
+    raw: str = ""        # snippet of the raw reading, for error analysis
 
 
 class Investigation:
     def __init__(self, hypotheses: list[BenchHypothesis], probes: dict[str, ProbeInstance], *,
                  policy: str = "voi", stop_confidence: float = 0.9, min_eig: float = 0.01,
-                 max_probes: int = 25, eps: float = beliefs.EPSILON, seed: int = 0):
+                 max_probes: int = 25, eps: Optional[float] = None, seed: int = 0):
         if policy not in POLICIES:
             raise ValueError(f"unknown policy {policy!r}")
         self.hyps = {h.id: h for h in hypotheses}
@@ -80,8 +82,12 @@ class Investigation:
         return {hid: self._predict(h, key) for hid, h in self.hyps.items()}
 
     def eig(self, key: str) -> float:
+        probe = self.probes[key]
         return beliefs.expected_information_gain(
-            self.posteriors, self._predictions(key), self.probes[key].outcomes, self.eps)
+            self.posteriors, self._predictions(key), probe.outcomes, self._eps(probe))
+
+    def _eps(self, probe: ProbeInstance) -> float:
+        return probe.template.eps if self.eps is None else self.eps
 
     def _unrun(self) -> list[str]:
         done = {s.probe for s in self.steps}
@@ -94,7 +100,7 @@ class Investigation:
         if not candidates:
             self.stop_reason = "no_probes_left"
             return None
-        if len(self.steps) >= self.max_probes:
+        if self.paid_steps() >= self.max_probes:
             self.stop_reason = "budget"
             return None
         if self.policy == "exhaustive":
@@ -111,14 +117,17 @@ class Investigation:
             return self.rng.choice(informative)
         return max(informative, key=lambda k: scored[k] / self.probes[k].cost)
 
-    def observe(self, key: str, outcome: str) -> None:
+    def observe(self, key: str, outcome: str, *, free: bool = False, raw: str = "") -> None:
         probe = self.probes[key]
         if outcome not in probe.outcomes:
             raise ValueError(f"{key}: outcome {outcome!r} not in {probe.outcomes}")
         eig = self.eig(key)
         self.posteriors = beliefs.update(
-            self.posteriors, self._predictions(key), outcome, probe.outcomes, self.eps)
-        self.steps.append(Step(key, outcome, eig, dict(self.posteriors)))
+            self.posteriors, self._predictions(key), outcome, probe.outcomes, self._eps(probe))
+        self.steps.append(Step(key, outcome, eig, dict(self.posteriors), free, raw[:600]))
+
+    def paid_steps(self) -> int:
+        return sum(1 for s in self.steps if not s.free)
 
     # ------------------------------------------------------------------ #
     def leader(self) -> BenchHypothesis:
@@ -137,8 +146,9 @@ class Investigation:
     def summary(self) -> dict:
         return {
             "policy": self.policy,
-            "probes_run": len(self.steps),
-            "probe_cost": sum(self.probes[s.probe].cost for s in self.steps),
+            "probes_run": self.paid_steps(),
+            "free_observations": len(self.steps) - self.paid_steps(),
+            "probe_cost": sum(self.probes[s.probe].cost for s in self.steps if not s.free),
             "stop_reason": self.stop_reason,
             "leader": self.leader().id,
             "posteriors": self.posteriors,

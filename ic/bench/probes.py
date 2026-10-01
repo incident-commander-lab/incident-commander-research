@@ -16,6 +16,10 @@ below are deliberately simple and stated in code so the paper can report them
 `cost` is relative (1.0 ≈ one cheap kubectl read). Log reads are pricier
 because their output is large.
 
+`eps` is each template's measurement-error rate for the Bayesian update. A
+kubectl state read is rarely wrong; a regex over free-form logs often is, so one
+ambiguous log line cannot swing the posterior on its own.
+
 The last outcome of every template is its healthy reading (the no-fault
 hypothesis relies on that).
 """
@@ -67,6 +71,7 @@ class ProbeTemplate:
     describe: str
     call: Callable[[str, str], str]
     label: Callable[[str, str], str]
+    eps: float = 0.05  # P(label contradicts the truth): low for kubectl state, high for log regexes
 
 
 @dataclass(frozen=True)
@@ -93,8 +98,31 @@ class ProbeInstance:
         return self.template.label(output, self.service)
 
 
+_HASH = re.compile(r"^[a-z0-9]{5,10}$")
+
+
+def pod_owner(pod: str) -> str:
+    """Workload name of a pod: 'geo-c47ff745-5bgdz' → 'geo' (Deployment: drop the
+    ReplicaSet hash and pod suffix), 'mongodb-geo-0' → 'mongodb-geo' (StatefulSet)."""
+    pod = pod.split("/", 1)[-1]  # events print 'pod/<name>'
+    parts = pod.split("-")
+    if len(parts) >= 3 and _HASH.match(parts[-2]) and _HASH.match(parts[-1]):
+        return "-".join(parts[:-2])
+    if len(parts) >= 2 and parts[-1].isdigit():
+        return "-".join(parts[:-1])
+    return pod
+
+
 def _lines_for(output: str, svc: str) -> list[str]:
-    return [ln for ln in output.splitlines() if svc in ln]
+    """Lines about exactly this service. A plain substring test would let 'geo'
+    match 'mongodb-geo', and 'user' match 'user-timeline-service'."""
+    rows = []
+    for ln in output.splitlines():
+        for tok in ln.split():
+            if tok == svc or pod_owner(tok) == svc:
+                rows.append(ln)
+                break
+    return rows
 
 
 # --------------------------------------------------------------------------- #
@@ -191,7 +219,7 @@ TEMPLATES: dict[str, ProbeTemplate] = {t.name: t for t in (
         "storage (volume mount/bind), image (pull failure), probe_failure (liveness/readiness), "
         "crash_backoff (restarts, OOM, eviction), none",
         lambda ns, s: f'exec_shell("kubectl get events -n {ns} --field-selector type=Warning --no-headers | grep {s}")',
-        label_event_reason),
+        label_event_reason, eps=0.10),
     ProbeTemplate(
         "log_signature", ("auth_errors", "config_errors", "connection_errors", "storage_errors",
                           "crash_errors", "clean"), 2.0,
@@ -200,7 +228,7 @@ TEMPLATES: dict[str, ProbeTemplate] = {t.name: t for t in (
         "dependency), storage_errors (disk/volume/database objects), crash_errors (panics, "
         "stack traces), clean",
         lambda ns, s: f'get_logs("{ns}", "{s}")',
-        label_log_signature),
+        label_log_signature, eps=0.25),
 )}
 
 

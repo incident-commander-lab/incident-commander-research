@@ -25,10 +25,10 @@ Namespace: {NS}
 SVC_OUT = "NAME  TYPE  CLUSTER-IP  PORT(S)\n" + "\n".join(
     f"{s}  ClusterIP  10.0.0.{i}  8080/TCP" for i, s in enumerate(SERVICES))
 PODS_OUT = "\n".join([
-    "frontend-7d9f-abc   1/1   Running            0   5m",
-    "geo-5c4b-xyz        0/1   CrashLoopBackOff   6   5m",
-    "profile-66aa-def    1/1   Running            0   5m",
-    "search-12bc-ghi     1/1   Running            0   5m",
+    "frontend-7d9f8c6b5-abcde 1/1   Running            0   5m",
+    "geo-5c4b9d7f6-xyz12      0/1   CrashLoopBackOff   6   5m",
+    "profile-66aa5b4c3-defgh  1/1   Running            0   5m",
+    "search-12bc3d4e5-ghijk   1/1   Running            0   5m",
 ])
 
 
@@ -45,7 +45,7 @@ def fake_env(call: str) -> str:
         return f"{svc}  {'<none>' if svc == 'geo' else '10.1.0.5:8080'}  5m"
     if "get events" in call:
         svc = call.split("grep ")[-1].rstrip('")')
-        return "1m  Warning  BackOff  pod/geo-5c4b-xyz  Back-off restarting" if svc == "geo" else ""
+        return "1m  Warning  BackOff  pod/geo-5c4b9d7f6-xyz12  Back-off restarting" if svc == "geo" else ""
     if call.startswith("get_logs"):
         svc = call.split('", "')[1].rstrip('")')
         return "panic: config missing\nerror x\nerror y" if svc == "geo" else "ok\nserving"
@@ -114,7 +114,9 @@ def test_voi_uses_fewer_probes_than_exhaustive():
     voi, exhaustive = run_agent("voi"), run_agent("exhaustive")
     assert exhaustive.result["submission"] == 'submit(["geo"])'
     assert voi.result["probes_run"] < exhaustive.result["probes_run"]
-    assert exhaustive.result["probes_run"] == len(SERVICES) * 5
+    # pod_health for every service is read for free from the discovery pod listing
+    assert exhaustive.result["free_observations"] == len(SERVICES)
+    assert exhaustive.result["probes_run"] == len(SERVICES) * 5 - len(SERVICES)
 
 
 def test_random_policy_still_stops():
@@ -185,8 +187,8 @@ def test_react_baseline_submits_and_counts_tokens(monkeypatch):
 
 
 def test_llm_chooser_baseline_uses_llm_decisions(monkeypatch):
-    choices = iter([baselines._Choice(action="probe", probe="pod_health:frontend"),
-                    baselines._Choice(action="probe", probe="pod_health:geo"),
+    choices = iter([baselines._Choice(action="probe", probe="endpoints:frontend"),
+                    baselines._Choice(action="probe", probe="endpoints:geo"),
                     baselines._Choice(action="stop", hypothesis="H2")])
     monkeypatch.setattr(llm, "json_call", lambda *a, **k: next(choices))
 
@@ -263,3 +265,33 @@ def test_llm_failure_submits_and_records_error():
     assert asyncio.run(agent.get_action(PODS_OUT)) == "```\nsubmit([])\n```"
     assert "401" in agent.result["llm_error"]
     assert asyncio.run(agent.get_action("anything")) == "```\nsubmit([])\n```"
+
+
+def test_pod_owner_and_exact_service_matching():
+    from ic.bench.probes import pod_owner
+    assert pod_owner("geo-c47ff745-5bgdz") == "geo"
+    assert pod_owner("mongodb-geo-5ff578bcb8-zbm6t") == "mongodb-geo"
+    assert pod_owner("pod/user-timeline-service-6c9b8d7f5-abcde") == "user-timeline-service"
+    assert pod_owner("mongodb-geo-0") == "mongodb-geo"
+    pods = ("geo-c47ff745-5bgdz        1/1 Running 0 1m\n"
+            "mongodb-geo-5ff578bcb8-zbm6t 0/1 Error 3 1m")
+    assert label_pod_health(pods, "geo") == "healthy"          # mongodb-geo's crash is not geo's
+    assert label_pod_health(pods, "mongodb-geo") == "unhealthy"
+
+
+def test_seen_crash_rules_out_no_fault_and_one_log_cannot_flip_it():
+    """Regression for the first AIOpsLab run: the crashed pod was visible in
+    discovery, then one 'clean' log reading pushed 'no fault' to 90% and the
+    agent stopped. Discovery evidence + noisier log probes must prevent that."""
+    def gen(problem, services, probes, observations, findings=None):
+        mk = lambda i, ft, sig, p: BenchHypothesis(f"H{i}", "geo", ft, "Application", "", p,
+                                                   {"log_signature:geo": sig})
+        return [mk(1, "Misconfiguration", "config_errors", 0.3), mk(2, "Dependency Problem", "connection_errors", 0.25),
+                mk(3, "Code Defect", "crash_errors", 0.2), hg.no_fault_hypothesis(probes)], {}
+    agent = VoIAgent("voi", generate=gen)
+    agent.init_context(PROBLEM)
+    agent.step(""); agent.step(SVC_OUT); agent.step(PODS_OUT)
+    assert agent.inv.posteriors[hg.NO_FAULT_ID] < 0.05      # geo CrashLoopBackOff already seen
+    agent.inv.observe("log_signature:geo", "clean")
+    assert agent.inv.posteriors[hg.NO_FAULT_ID] < 0.5
+    assert agent.inv.leader().service == "geo"

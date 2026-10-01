@@ -23,7 +23,7 @@ from typing import Optional
 from .. import llm
 from . import hypotheses as hyp_gen
 from .decide import Investigation
-from .probes import instances, parse_services
+from .probes import _lines_for as _owned_rows, instances, parse_services
 
 
 def task_type(problem: str) -> str:
@@ -94,7 +94,7 @@ class VoIAgent:
             return self._next()
 
         if self.phase == "investigate":
-            self.inv.observe(self.pending, self.inv.probes[self.pending].label(state))
+            self.inv.observe(self.pending, self.inv.probes[self.pending].label(state), raw=state)
             if self.inv.surprise() and self.regenerations < self.max_regenerations:
                 self.regenerations += 1
                 try:
@@ -110,10 +110,24 @@ class VoIAgent:
         hyps, meta = self._generate(self.problem, self.services, self.probes,
                                     self.observations, findings)
         self.gen_meta.append(meta)
-        old_steps = self.inv.steps if self.inv else []
+        old_steps = self.inv.steps if self.inv else self._discovery_evidence()
         self.inv = Investigation(hyps, self.probes, **self.kw)
         for s in old_steps:  # carry evidence over to the new hypothesis set
-            self.inv.observe(s.probe, s.outcome)
+            self.inv.observe(s.probe, s.outcome, free=s.free, raw=s.raw)
+
+    def _discovery_evidence(self) -> list:
+        """The pod listing from discovery already answers pod_health for every
+        service. Count it as evidence (free) instead of only showing it to the LLM:
+        a crashed pod we have already seen must rule out 'no fault'."""
+        from .decide import Step
+        pods = self.observations.get("kubectl get pods", "")
+        out = []
+        for svc in self.services:
+            key = f"pod_health:{svc}"
+            if key in self.probes and any(True for _ in _owned_rows(pods, svc)):
+                out.append(Step(key, self.probes[key].label(pods), 0.0, {}, True,
+                                "\n".join(_owned_rows(pods, svc))))
+        return out
 
     def _give_up(self, error: Exception) -> str:
         """No hypotheses could be generated. Submit the 'nothing found' answer so
