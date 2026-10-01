@@ -168,10 +168,19 @@ def _record(input_tokens: int, output_tokens: int) -> None:
 
 
 def _reasoning_opts(provider: Provider) -> dict:
-    """Keep reasoning models from spending the whole output budget thinking."""
-    if provider.name.startswith("openrouter_oai:"):
-        return {"reasoning": {"effort": os.environ.get("IC_REASONING_EFFORT", "low")}}
-    return {}
+    """Reasoning control for OpenRouter models. Default: ask for NO reasoning —
+    our prompts need a structured answer, not a long think. Measured on the
+    19-service AIOpsLab prompt, an explicit effort="low" switched reasoning ON for
+    Laguna S 2.1 (10k reasoning tokens, 181 s vs 551 tokens, 11 s off).
+    IC_REASONING_EFFORT=low|medium|high opts back in; =default sends nothing."""
+    if not provider.name.startswith("openrouter_oai:"):
+        return {}
+    effort = os.environ.get("IC_REASONING_EFFORT", "off")
+    if effort == "default":
+        return {}
+    if effort == "off":
+        return {"reasoning": {"enabled": False}}
+    return {"reasoning": {"effort": effort}}
 
 
 def _openai_chat(provider: Provider, system: str, user: str,
@@ -226,8 +235,16 @@ def _strip_fences(s: str) -> str:
 
 
 def _parse_into(schema: Type[T], raw: str) -> T:
-    """Parse model text into the Pydantic schema, or raise."""
-    data = json.loads(_strip_fences(raw))
+    """Parse model text into the Pydantic schema, or raise. Open models often wrap
+    the JSON in a sentence of prose; fall back to the outermost {...} span."""
+    text = _strip_fences(raw)
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        start, end = text.find("{"), text.rfind("}")
+        if start < 0 or end <= start:
+            raise
+        data = json.loads(text[start:end + 1])
     return schema.model_validate(data)
 
 

@@ -295,3 +295,12 @@ def test_seen_crash_rules_out_no_fault_and_one_log_cannot_flip_it():
     agent.inv.observe("log_signature:geo", "clean")
     assert agent.inv.posteriors[hg.NO_FAULT_ID] < 0.5
     assert agent.inv.leader().service == "geo"
+
+
+def test_parser_accepts_prose_around_json():
+    from pydantic import BaseModel
+
+    class M(BaseModel):
+        a: int
+    assert llm._parse_into(M, 'Looking at the pods, geo is failing.\n{"a": 1}\nThat is my answer.').a == 1
+    assert llm._parse_into(M, '```json\n{"a": 2}\n```').a == 2
