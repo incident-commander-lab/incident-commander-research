@@ -15,6 +15,9 @@ below are deliberately simple and stated in code so the paper can report them
 
 `cost` is relative (1.0 ≈ one cheap kubectl read). Log reads are pricier
 because their output is large.
+
+The last outcome of every template is its healthy reading (the no-fault
+hypothesis relies on that).
 """
 from __future__ import annotations
 
@@ -22,11 +25,38 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-ERROR_RE = re.compile(
-    r"\b(error|exception|panic|fatal|refused|timed? ?out|unavailable|failed|unauthori[sz]ed|denied)\b",
-    re.IGNORECASE,
-)
-ERROR_LINE_THRESHOLD = 3  # ≥ this many matching log lines ⇒ "errors"
+# Log signatures — which KIND of failure a service's logs show. Patterns are
+# generic SRE vocabulary (not tuned to any benchmark problem). Order matters
+# only for ties: earlier categories win.
+LOG_SIGNATURES: dict[str, re.Pattern] = {
+    "auth_errors": re.compile(
+        r"unauthori[sz]ed|authenticat\w* fail|auth\w* error|permission denied|access denied|"
+        r"not authorized|invalid (credentials|password|token)|forbidden|\b401\b|\b403\b", re.I),
+    "config_errors": re.compile(
+        r"config\w* (error|invalid|missing|not found)|missing (env|environment|config|argument|flag)|"
+        r"invalid (argument|option|value|flag)|unknown (flag|option)|no such file|cannot parse|"
+        r"failed to (load|parse|read) config|exec format error|command not found", re.I),
+    "connection_errors": re.compile(
+        r"connection refused|connection reset|no route to host|i/o timeout|dial tcp|"
+        r"timed? ?out|deadline exceeded|unreachable|no such host|broken pipe|\bEOF\b", re.I),
+    "storage_errors": re.compile(
+        r"no space left|disk (full|error|quota)|read-only file system|i/o error|"
+        r"(failed to|cannot|unable to) mount|mount (failed|error)|volume .*(not found|failed|missing)|"
+        r"database .* (not found|does not exist)|user .* not found", re.I),
+    "crash_errors": re.compile(
+        r"panic|segmentation fault|sigsegv|traceback|stack trace|nil pointer|null ?pointer|"
+        r"fatal error|uncaught exception|core dumped", re.I),
+}
+LOG_SIGNATURE_MIN_LINES = 2  # a category needs ≥ this many matching lines
+
+# Kubernetes event reasons → coarse category (`kubectl get events` REASON column).
+EVENT_REASONS: dict[str, tuple[str, ...]] = {
+    "scheduling": ("FailedScheduling", "NotTriggerScaleUp"),
+    "storage": ("FailedMount", "FailedAttachVolume", "ProvisioningFailed", "FailedBinding"),
+    "image": ("Failed", "ErrImagePull", "ImagePullBackOff", "InspectFailed"),
+    "probe_failure": ("Unhealthy", "ProbeWarning"),
+    "crash_backoff": ("BackOff", "OOMKilling", "Killing", "Evicted"),
+}
 
 
 @dataclass(frozen=True)
@@ -92,11 +122,18 @@ def label_pod_health(output: str, svc: str) -> str:
     return "healthy"
 
 
-def label_log_errors(output: str, svc: str) -> str:
-    if output.startswith("Error:"):  # AIOpsLab's "service does not exist" reply
-        return "errors"
-    hits = sum(1 for ln in output.splitlines() if ERROR_RE.search(ln))
-    return "errors" if hits >= ERROR_LINE_THRESHOLD else "clean"
+def label_log_signature(output: str, svc: str) -> str:
+    """The failure category with the most matching log lines (≥ the minimum),
+    or 'clean'. An AIOpsLab 'service does not exist' reply counts as a crash."""
+    if output.startswith("Error:"):
+        return "crash_errors"
+    lines = output.splitlines()
+    best, best_hits = "clean", LOG_SIGNATURE_MIN_LINES - 1
+    for category, pattern in LOG_SIGNATURES.items():
+        hits = sum(1 for ln in lines if pattern.search(ln))
+        if hits > best_hits:
+            best, best_hits = category, hits
+    return best
 
 
 def label_endpoints(output: str, svc: str) -> str:
@@ -108,8 +145,15 @@ def label_endpoints(output: str, svc: str) -> str:
     return "has_endpoints"
 
 
-def label_warning_events(output: str, svc: str) -> str:
-    return "warnings" if _lines_for(output, svc) else "none"
+def label_event_reason(output: str, svc: str) -> str:
+    """Most specific Warning-event category mentioning the service, or 'none'.
+    Checked in EVENT_REASONS order, so scheduling/storage beat generic backoff."""
+    rows = _lines_for(output, svc)
+    reasons = {tok for row in rows for tok in row.split()}
+    for category, names in EVENT_REASONS.items():
+        if reasons & set(names):
+            return category
+    return "none"
 
 
 def label_deployment(output: str, svc: str) -> str:
@@ -142,15 +186,21 @@ TEMPLATES: dict[str, ProbeTemplate] = {t.name: t for t in (
         lambda ns, s: f'exec_shell("kubectl get endpoints {s} -n {ns} --no-headers")',
         label_endpoints),
     ProbeTemplate(
-        "warning_events", ("warnings", "none"), 1.0,
-        "Kubernetes Warning events mention the service",
+        "event_reason", ("scheduling", "storage", "image", "probe_failure", "crash_backoff", "none"), 1.0,
+        "Kind of Kubernetes Warning event for the service: scheduling (pod cannot be placed), "
+        "storage (volume mount/bind), image (pull failure), probe_failure (liveness/readiness), "
+        "crash_backoff (restarts, OOM, eviction), none",
         lambda ns, s: f'exec_shell("kubectl get events -n {ns} --field-selector type=Warning --no-headers | grep {s}")',
-        label_warning_events),
+        label_event_reason),
     ProbeTemplate(
-        "log_errors", ("errors", "clean"), 2.0,
-        f"The service's logs contain ≥{ERROR_LINE_THRESHOLD} error-like lines",
+        "log_signature", ("auth_errors", "config_errors", "connection_errors", "storage_errors",
+                          "crash_errors", "clean"), 2.0,
+        "Kind of error dominating the service's logs: auth_errors (credentials/permissions), "
+        "config_errors (bad/missing config, args, binary), connection_errors (cannot reach a "
+        "dependency), storage_errors (disk/volume/database objects), crash_errors (panics, "
+        "stack traces), clean",
         lambda ns, s: f'get_logs("{ns}", "{s}")',
-        label_log_errors),
+        label_log_signature),
 )}
 
 

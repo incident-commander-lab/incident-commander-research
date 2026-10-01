@@ -64,8 +64,20 @@ class Investigation:
         self.stop_reason: Optional[str] = None
 
     # ------------------------------------------------------------------ #
+    def _predict(self, h: BenchHypothesis, key: str) -> Optional[str]:
+        """A hypothesis's prediction for a probe. Single-root-cause semantics:
+        if it is silent about a probe on ANOTHER service, it predicts that probe's
+        healthy outcome (what the service looks like without this fault). Silence
+        about its own service stays agnostic (None)."""
+        if key in h.predictions:
+            return h.predictions[key]
+        probe = self.probes[key]
+        if h.service is not None and probe.service != h.service:
+            return probe.outcomes[-1]
+        return None
+
     def _predictions(self, key: str) -> dict[str, Optional[str]]:
-        return {hid: h.predictions.get(key) for hid, h in self.hyps.items()}
+        return {hid: self._predict(h, key) for hid, h in self.hyps.items()}
 
     def eig(self, key: str) -> float:
         return beliefs.expected_information_gain(
@@ -118,7 +130,7 @@ class Investigation:
         if not self.steps:
             return False
         for h in self.hyps.values():
-            if all(h.predictions.get(s.probe) in (None, s.outcome) for s in self.steps):
+            if all(self._predict(h, s.probe) in (None, s.outcome) for s in self.steps):
                 return False
         return True
 
