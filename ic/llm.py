@@ -10,6 +10,10 @@ Design goals:
   * Provider swap is just base_url + model + key. We use the Anthropic Messages format
     throughout, because OpenRouter exposes an Anthropic-compatible /messages endpoint,
     so the same client works for both OpenRouter-free and Claude direct.
+  * Open models: the "vllm" provider speaks the OpenAI-compatible
+    /v1/chat/completions API that vLLM serves (e.g. on AMD Developer Cloud).
+  * Token accounting: every successful call adds to USAGE, so experiments can
+    report tokens per incident (see reset_usage / USAGE).
   * JSON-contract failover: if a (weak, free) model returns unparseable or
     schema-invalid JSON, retry once, then fail over to the next provider in the chain.
     This keeps a flaky free model from silently corrupting your ablation numbers.
@@ -52,8 +56,11 @@ class Provider:
     model: str
     base_url: str | None      # None => Anthropic's own default endpoint
     api_key_env: str
+    api: str = "anthropic"    # "anthropic" (Messages) | "openai" (chat/completions)
 
     def has_key(self) -> bool:
+        if self.name == "vllm":
+            return bool(self.base_url)  # vLLM accepts any key; the URL is what matters
         key = os.environ.get(self.api_key_env)
         return bool(key) and not key.endswith("REPLACE_ME")
 
@@ -92,6 +99,16 @@ def _provider(name: str) -> Provider:
         # Claude direct. Use for the FINAL quality pass — confirm the agent-disagreement
         # and probe mechanism survive on a strong model before you stake the demo on it.
         return Provider("anthropic", _anthropic_model(), None, "ANTHROPIC_API_KEY")
+    if name == "vllm":
+        # Open model served by vLLM (OpenAI-compatible). Base URL ends at /v1.
+        return Provider("vllm", os.environ.get("IC_VLLM_MODEL", "Qwen/Qwen3-32B"),
+                        os.environ.get("IC_VLLM_BASE_URL"), "IC_VLLM_API_KEY", api="openai")
+    if name.startswith("openrouter_oai:"):
+        # OpenRouter via its OpenAI-compatible endpoint. Reasoning models (Nemotron,
+        # Qwen3.x, Dots…) return separate reasoning there instead of breaking the
+        # Anthropic-format adapter. Used by the benchmark (ic/bench).
+        return Provider(name, name.split(":", 1)[1], "https://openrouter.ai/api/v1",
+                        "OPENROUTER_API_KEY", api="openai")
     raise ValueError(f"Unknown provider: {name!r}")
 
 
@@ -101,11 +118,20 @@ _FAILOVER = {
     "openrouter_free":   ["openrouter_free", "openrouter_pinned", "anthropic"],
     "openrouter_pinned": ["openrouter_pinned", "openrouter_free", "anthropic"],
     "anthropic":         ["anthropic"],  # no silent fallback off Claude during a graded run
+    "vllm":              ["vllm"],       # experiments must stay on one model
 }
 
 
 def active_chain() -> list[Provider]:
     primary = os.environ.get("IC_PROVIDER", "openrouter_free")
+    if primary == "openrouter_models":
+        # IC_OPENROUTER_MODELS="model-a,model-b,model-c": try in order (development).
+        # With IC_STRICT_PROVIDER=1 only the first is used (experiments).
+        models = [m.strip() for m in os.environ.get("IC_OPENROUTER_MODELS", "").split(",") if m.strip()]
+        chain = [_provider(f"openrouter_oai:{m}") for m in models]
+        return chain[:1] if os.environ.get("IC_STRICT_PROVIDER") == "1" else chain
+    if os.environ.get("IC_STRICT_PROVIDER") == "1":  # experiments: one model, no failover
+        return [_provider(primary)]
     return [_provider(n) for n in _FAILOVER.get(primary, [primary])]
 
 
@@ -119,6 +145,61 @@ def llm_enabled() -> bool:
     if os.environ.get("IC_USE_LLM") != "1":
         return False
     return any(p.has_key() for p in active_chain())
+
+
+# --------------------------------------------------------------------------- #
+# Token accounting
+# --------------------------------------------------------------------------- #
+USAGE = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "contract_failures": 0,
+         "answered_by": []}
+
+
+def reset_usage() -> dict:
+    """Zero the counters and return the previous totals."""
+    prev = dict(USAGE)
+    USAGE.update(calls=0, input_tokens=0, output_tokens=0, contract_failures=0, answered_by=[])
+    return prev
+
+
+def _record(input_tokens: int, output_tokens: int) -> None:
+    USAGE["calls"] += 1
+    USAGE["input_tokens"] += input_tokens or 0
+    USAGE["output_tokens"] += output_tokens or 0
+
+
+def _reasoning_opts(provider: Provider) -> dict:
+    """Keep reasoning models from spending the whole output budget thinking."""
+    if provider.name.startswith("openrouter_oai:"):
+        return {"reasoning": {"effort": os.environ.get("IC_REASONING_EFFORT", "low")}}
+    return {}
+
+
+def _openai_chat(provider: Provider, system: str, user: str,
+                 max_tokens: int, temperature: float) -> str:
+    """One call to an OpenAI-compatible /chat/completions endpoint (vLLM)."""
+    import httpx  # ships with the anthropic SDK
+    key = os.environ.get(provider.api_key_env) or "EMPTY"
+    r = httpx.post(
+        f"{provider.base_url.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {key}"},
+        json={"model": provider.model, "max_tokens": max_tokens, "temperature": temperature,
+              "messages": [{"role": "system", "content": system},
+                           {"role": "user", "content": user}],
+              **_reasoning_opts(provider)},
+        timeout=float(os.environ.get("IC_LLM_TIMEOUT", "120")),
+    )
+    r.raise_for_status()
+    body = r.json()
+    u = body.get("usage") or {}
+    _record(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
+    return body["choices"][0]["message"]["content"] or ""
+
+
+def _strip_think(s: str) -> str:
+    """Reasoning models (Qwen3, DeepSeek-R1) may prefix output with <think>…</think>."""
+    if "</think>" in s:
+        s = s.split("</think>", 1)[1]
+    return s
 
 
 # --------------------------------------------------------------------------- #
@@ -175,24 +256,37 @@ def json_call(
 
     errors: list[str] = []
     for provider in active_chain():
-        try:
-            client = provider.client()
-        except RuntimeError as e:
-            errors.append(str(e))
-            continue  # key missing for this provider; try the next
+        client = None
+        if provider.api == "anthropic":
+            try:
+                client = provider.client()
+            except RuntimeError as e:
+                errors.append(str(e))
+                continue  # key missing for this provider; try the next
+        elif not provider.has_key():
+            errors.append(f"[{provider.name}] missing base URL or API key")
+            continue
 
         for attempt in (1, 2):  # one retry on the same provider
             try:
-                resp = client.messages.create(
-                    model=provider.model,
-                    max_tokens=max_tokens,
-                    temperature=temperature,
-                    system=full_system,
-                    messages=[{"role": "user", "content": user}],
-                )
-                raw = _extract_text(resp)
-                return _parse_into(schema, raw)
+                if provider.api == "openai":
+                    raw = _openai_chat(provider, full_system, user, max_tokens, temperature)
+                else:
+                    resp = client.messages.create(
+                        model=provider.model,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        system=full_system,
+                        messages=[{"role": "user", "content": user}],
+                    )
+                    _record(getattr(resp.usage, "input_tokens", 0),
+                            getattr(resp.usage, "output_tokens", 0))
+                    raw = _extract_text(resp)
+                parsed = _parse_into(schema, _strip_think(raw))
+                USAGE["answered_by"].append(provider.model)
+                return parsed
             except (json.JSONDecodeError, ValidationError) as e:
+                USAGE["contract_failures"] += 1
                 errors.append(f"[{provider.name} attempt {attempt}] bad JSON: {e}")
                 continue
             except Exception as e:  # network / rate limit / auth — move to next provider
@@ -202,6 +296,38 @@ def json_call(
     raise RuntimeError(
         "json_call: every provider failed the JSON contract.\n  " + "\n  ".join(errors)
     )
+
+
+# --------------------------------------------------------------------------- #
+# Free-text multi-turn call — used only by the pure-LLM benchmark baselines,
+# which must talk to the environment the way a ReAct agent does.
+# --------------------------------------------------------------------------- #
+def chat(system: str, messages: list[dict], *, max_tokens: int = 2000,
+         temperature: float = 0.2) -> str:
+    """messages: [{"role": "user"|"assistant", "content": str}, ...]. No failover:
+    a baseline must stay on one model, so the first provider in the chain is used."""
+    provider = active_chain()[0]
+    if provider.api == "openai":
+        import httpx
+        key = os.environ.get(provider.api_key_env) or "EMPTY"
+        r = httpx.post(
+            f"{provider.base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            json={"model": provider.model, "max_tokens": max_tokens, "temperature": temperature,
+                  "messages": [{"role": "system", "content": system}, *messages],
+                  **_reasoning_opts(provider)},
+            timeout=float(os.environ.get("IC_LLM_TIMEOUT", "120")),
+        )
+        r.raise_for_status()
+        body = r.json()
+        u = body.get("usage") or {}
+        _record(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
+        return _strip_think(body["choices"][0]["message"]["content"] or "")
+    resp = provider.client().messages.create(
+        model=provider.model, max_tokens=max_tokens, temperature=temperature,
+        system=system, messages=messages)
+    _record(getattr(resp.usage, "input_tokens", 0), getattr(resp.usage, "output_tokens", 0))
+    return _strip_think(_extract_text(resp))
 
 
 # --------------------------------------------------------------------------- #

@@ -1,0 +1,180 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Single EC2 host for the Incident Commander AIOpsLab benchmark (kind cluster + agents) -
+  no inbound ports (Session Manager only), auto-stops when idle, and a gross-cost budget
+  alert so promotional credits are not silently exhausted.
+
+Metadata:
+  AWSToolsMetrics:
+    AWSAgentToolkit: aws-cloudformation@3
+  com.aws.cloudformation.Context:
+    arch: 1 EC2 (Docker->kind k8s->AIOpsLab apps) + idle-stop alarm + monthly budget; LLM is external (OpenRouter)
+    must:
+      - no SG ingress; access via SSM Session Manager only
+      - no secrets in template; OPENROUTER_API_KEY is written to ~/.env on the host by hand
+    ref: docs/paper/EXPERIMENT_PLAN.md
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: m7i.2xlarge
+    AllowedValues: [m7i.xlarge, m7i.2xlarge, m7i.4xlarge]
+    Description: 2xlarge = 8 vCPU / 32 GiB, sized for one AIOpsLab app + Prometheus + Jaeger.
+  VolumeSizeGiB:
+    Type: Number
+    Default: 150
+    MinValue: 100
+    Description: AIOpsLab pulls ~200 container images.
+  IdleStopPeriods:
+    Type: Number
+    Default: 12
+    MinValue: 3
+    Description: Stop after this many consecutive 5-minute periods below 3% CPU (12 = 1 hour).
+  BudgetEmail:
+    Type: String
+    AllowedPattern: ".+@.+"
+    Description: Address that receives budget alerts.
+  MonthlyBudgetUSD:
+    Type: Number
+    Default: 40
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    Description: Ubuntu 24.04 x86 (Python 3.12 satisfies AIOpsLab's >=3.11,<3.13).
+
+Resources:
+  HostRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: SSM agent registration only -> Session Manager shell, no SSH keys
+        must: [no extra policies; host needs no AWS API access]
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  HostProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref HostRole]
+
+  HostSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: no rules declared -> AWS default (all egress for image pulls/OpenRouter/SSM, zero ingress); default VPC
+        must: [never add ingress]
+    Properties:
+      GroupDescription: Benchmark host - egress only
+
+  Host:
+    Type: AWS::EC2::Instance
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: x86 over Graviton - some AIOpsLab app images may be amd64-only; UserData installs tools only, cluster is created by hand (see Outputs)
+        must: [IMDSv2 required, root volume encrypted]
+        mutable: free-to-tune
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref HostProfile
+      SecurityGroupIds: [!GetAtt HostSecurityGroup.GroupId]
+      MetadataOptions:
+        HttpTokens: required
+        HttpEndpoint: enabled
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: !Ref VolumeSizeGiB
+            VolumeType: gp3
+            Encrypted: true
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-host
+        - Key: project
+          Value: incident-commander-bench
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          set -euxo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y docker.io git python3-venv python3-pip pipx jq curl
+          usermod -aG docker ubuntu
+          # kubectl, kind, helm
+          KV=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
+          curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${KV}/bin/linux/amd64/kubectl"
+          curl -fsSLo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
+          chmod +x /usr/local/bin/kubectl /usr/local/bin/kind
+          curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+          # kind runs many pods: raise inotify limits
+          echo "fs.inotify.max_user_watches=524288" >> /etc/sysctl.conf
+          echo "fs.inotify.max_user_instances=512" >> /etc/sysctl.conf
+          sysctl -p
+          sudo -u ubuntu bash -lc 'pipx install poetry && pipx ensurepath'
+          sudo -u ubuntu git clone --depth 1 --recurse-submodules https://github.com/microsoft/AIOpsLab.git /home/ubuntu/AIOpsLab
+          sudo -u ubuntu git clone --depth 1 https://github.com/S2800-0/incident-commander.git /home/ubuntu/incident-commander
+          touch /home/ubuntu/BOOTSTRAP_DONE
+
+  IdleStopAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: forgotten running host is the main credit risk; stop (not terminate) keeps disk + results
+        must: [action must be stop, never terminate]
+    Properties:
+      AlarmDescription: Stop the benchmark host when idle
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref Host
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: !Ref IdleStopPeriods
+      Threshold: 3
+      ComparisonOperator: LessThanThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - !Sub arn:${AWS::Partition}:automate:${AWS::Region}:ec2:stop
+
+  Budget:
+    Type: AWS::Budgets::Budget
+    Metadata:
+      com.aws.cloudformation.Context:
+        why: IncludeCredit=false so alerts track gross spend; with credits included net cost stays $0 and alerts never fire
+    Properties:
+      Budget:
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUSD
+          Unit: USD
+        CostTypes:
+          IncludeCredit: false
+          IncludeRefund: false
+      NotificationsWithSubscribers:
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 50 }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+        - Notification: { NotificationType: ACTUAL, ComparisonOperator: GREATER_THAN, Threshold: 90 }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+        - Notification: { NotificationType: FORECASTED, ComparisonOperator: GREATER_THAN, Threshold: 100 }
+          Subscribers: [{ SubscriptionType: EMAIL, Address: !Ref BudgetEmail }]
+
+Outputs:
+  InstanceId:
+    Value: !Ref Host
+  Connect:
+    Description: Shell on the host (needs the Session Manager plugin locally)
+    Value: !Sub aws ssm start-session --target ${Host} --region ${AWS::Region}
+  NextSteps:
+    Value: >-
+      wait for ~/BOOTSTRAP_DONE; cd AIOpsLab && kind create cluster --config kind/kind-config-x86.yaml;
+      poetry install; put OPENROUTER_API_KEY in ~/incident-commander/.env
