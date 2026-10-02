@@ -59,7 +59,7 @@ class Provider:
     api: str = "anthropic"    # "anthropic" (Messages) | "openai" (chat/completions)
 
     def has_key(self) -> bool:
-        if self.name == "vllm":
+        if self.name == "vllm" or self.name.startswith("ollama:"):
             return bool(self.base_url)  # vLLM accepts any key; the URL is what matters
         key = os.environ.get(self.api_key_env)
         return bool(key) and not key.endswith("REPLACE_ME")
@@ -103,6 +103,13 @@ def _provider(name: str) -> Provider:
         # Open model served by vLLM (OpenAI-compatible). Base URL ends at /v1.
         return Provider("vllm", os.environ.get("IC_VLLM_MODEL", "Qwen/Qwen3-32B"),
                         os.environ.get("IC_VLLM_BASE_URL"), "IC_VLLM_API_KEY", api="openai")
+    if name.startswith("ollama:"):
+        # A model YOU serve with Ollama (OpenAI-compatible). Free, unlimited, and
+        # reproducible: anyone can pull the same open-weights model. Over a tunnel
+        # the benchmark host reaches it via IC_OLLAMA_BASE_URL.
+        return Provider(name, name.split(":", 1)[1],
+                        os.environ.get("IC_OLLAMA_BASE_URL", "http://localhost:11434/v1"),
+                        "IC_OLLAMA_API_KEY", api="openai")
     if name.startswith("gemini:"):
         # Google AI Studio (Gemini API) via its OpenAI-compatible endpoint. Hosts
         # closed Gemini models and open-weights Gemma models. Free tier: requests
@@ -136,7 +143,8 @@ def active_chain() -> list[Provider]:
         # With IC_STRICT_PROVIDER=1 only the first is used (experiments).
         # Entries may be prefixed "gemini:" to use Google AI Studio instead of OpenRouter.
         models = [m.strip() for m in os.environ.get("IC_OPENROUTER_MODELS", "").split(",") if m.strip()]
-        chain = [_provider(m if m.startswith("gemini:") else f"openrouter_oai:{m}") for m in models]
+        chain = [_provider(m if m.startswith(("gemini:", "ollama:")) else f"openrouter_oai:{m}")
+                 for m in models]
         return chain[:1] if os.environ.get("IC_STRICT_PROVIDER") == "1" else chain
     if os.environ.get("IC_STRICT_PROVIDER") == "1":  # experiments: one model, no failover
         return [_provider(primary)]
@@ -183,6 +191,11 @@ def _reasoning_opts(provider: Provider) -> dict:
     Laguna S 2.1 (10k reasoning tokens, 181 s vs 551 tokens, 11 s off).
     IC_REASONING_EFFORT=low|medium|high opts back in; =default sends nothing."""
     effort = os.environ.get("IC_REASONING_EFFORT", "off")
+    if provider.name.startswith("ollama:"):
+        # Ollama's OpenAI endpoint maps reasoning_effort onto the model's think switch.
+        if effort == "default":
+            return {}
+        return {"reasoning_effort": "none" if effort == "off" else effort}
     if provider.name.startswith("gemini:"):
         # Gemini's OpenAI-compatible API takes reasoning_effort; Gemma has no thinking.
         if effort == "default" or "gemma" in provider.model:
