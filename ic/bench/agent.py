@@ -17,11 +17,13 @@ It never imports aiopslab, so it is unit-testable offline (tests/test_bench.py).
 from __future__ import annotations
 
 import json
+import os
 import time
 from typing import Optional
 
 from .. import llm
 from . import hypotheses as hyp_gen
+from . import sensors
 from .decide import Investigation
 from .probes import _lines_for as _owned_rows, instances, parse_services
 
@@ -46,12 +48,18 @@ def _block(call: str) -> str:
 class VoIAgent:
     def __init__(self, policy: str = "voi", *, stop_confidence: float = 0.9,
                  min_eig: float = 0.01, max_probes: int = 25, seed: int = 0,
-                 max_regenerations: int = 1, generate=hyp_gen.generate):
+                 max_regenerations: int = 1, generate=hyp_gen.generate,
+                 log_reader: Optional[str] = None, read_log=None):
         self.policy = policy
         self.kw = dict(policy=policy, stop_confidence=stop_confidence,
                        min_eig=min_eig, max_probes=max_probes, seed=seed)
         self.max_regenerations = max_regenerations
         self._generate = generate  # injectable for offline tests
+        # "llm": the LLM labels log_signature readings (grounded, quote-checked);
+        # "regex": pattern matching only. Default: llm when the LLM is enabled.
+        self.log_reader = log_reader or os.environ.get(
+            "IC_LOG_READER", "llm" if llm.llm_enabled() else "regex")
+        self._read_log = read_log or sensors.read_log
         self.result: dict = {}
 
     def init_context(self, problem_desc: str, instructions: str = "", apis=None):
@@ -94,7 +102,7 @@ class VoIAgent:
             return self._next()
 
         if self.phase == "investigate":
-            self.inv.observe(self.pending, self.inv.probes[self.pending].label(state), raw=state)
+            self._observe_pending(state)
             if self.inv.surprise() and self.regenerations < self.max_regenerations:
                 self.regenerations += 1
                 try:
@@ -113,7 +121,7 @@ class VoIAgent:
         old_steps = self.inv.steps if self.inv else self._discovery_evidence()
         self.inv = Investigation(hyps, self.probes, **self.kw)
         for s in old_steps:  # carry evidence over to the new hypothesis set
-            self.inv.observe(s.probe, s.outcome, free=s.free, raw=s.raw)
+            self.inv.observe(s.probe, s.outcome, free=s.free, raw=s.raw, eps=s.eps, sensor=s.sensor)
 
     def _discovery_evidence(self) -> list:
         """The pod listing from discovery already answers pod_health for every
@@ -128,6 +136,17 @@ class VoIAgent:
                 out.append(Step(key, self.probes[key].label(pods), 0.0, {}, True,
                                 "\n".join(_owned_rows(pods, svc))))
         return out
+
+    def _observe_pending(self, state: str) -> None:
+        probe = self.inv.probes[self.pending]
+        label, eps, sensor = probe.label(state), None, None
+        if probe.template.name == "log_signature" and self.log_reader == "llm":
+            llm_label, sensor = self._read_log(state, probe.service, probe.outcomes,
+                                               probe.template.describe)
+            sensor["regex_label"] = label
+            if llm_label is not None:
+                label, eps = llm_label, sensors.LLM_READ_EPS
+        self.inv.observe(self.pending, label, raw=state, eps=eps, sensor=sensor)
 
     def _give_up(self, error: Exception) -> str:
         """No hypotheses could be generated. Submit the 'nothing found' answer so
@@ -175,6 +194,7 @@ class VoIAgent:
             "hypotheses": {h.id: {"service": h.service, "fault_type": h.fault_type,
                                   "prior": h.prior} for h in self.inv.hyps.values()},
             "regenerations": self.regenerations,
+            "log_reader": self.log_reader,
             "generation_meta": self.gen_meta,
             "llm_usage": dict(llm.USAGE),
             "wall_seconds": round(time.monotonic() - self.t0, 2),

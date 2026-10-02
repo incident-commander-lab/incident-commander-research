@@ -44,6 +44,8 @@ class Step:
     posteriors: dict[str, float]
     free: bool = False   # read from discovery output, not a probe the agent paid for
     raw: str = ""        # snippet of the raw reading, for error analysis
+    eps: Optional[float] = None   # measurement error used for this reading (None: template default)
+    sensor: Optional[dict] = None  # how the label was produced, when not by the regex
 
 
 class Investigation:
@@ -117,14 +119,16 @@ class Investigation:
             return self.rng.choice(informative)
         return max(informative, key=lambda k: scored[k] / self.probes[k].cost)
 
-    def observe(self, key: str, outcome: str, *, free: bool = False, raw: str = "") -> None:
+    def observe(self, key: str, outcome: str, *, free: bool = False, raw: str = "",
+                eps: Optional[float] = None, sensor: Optional[dict] = None) -> None:
         probe = self.probes[key]
         if outcome not in probe.outcomes:
             raise ValueError(f"{key}: outcome {outcome!r} not in {probe.outcomes}")
         eig = self.eig(key)
+        e = eps if eps is not None else self._eps(probe)
         self.posteriors = beliefs.update(
-            self.posteriors, self._predictions(key), outcome, probe.outcomes, self._eps(probe))
-        self.steps.append(Step(key, outcome, eig, dict(self.posteriors), free, raw[:600]))
+            self.posteriors, self._predictions(key), outcome, probe.outcomes, e)
+        self.steps.append(Step(key, outcome, eig, dict(self.posteriors), free, raw[:600], eps, sensor))
 
     def paid_steps(self) -> int:
         return sum(1 for s in self.steps if not s.free)

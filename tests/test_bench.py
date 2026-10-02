@@ -335,3 +335,45 @@ def test_parser_takes_first_valid_object_and_ignores_trailing_text():
 def test_parse_services_ignores_aiopslab_preamble():
     out = "Please take the next action\n" + SVC_OUT
     assert parse_services(out) == SERVICES
+
+
+# --------------------------------------------------------------------------- #
+# LLM log reader (sensor)
+# --------------------------------------------------------------------------- #
+from ic.bench import sensors
+
+GEO_LOG = ("\x1b[90m2026-10-02T09:34:20Z\x1b[0m INF cmd/geo/main.go:36 > Read database URL: mongodb-geo:27777\n"
+           "INF cmd/geo/main.go:37 > Initializing DB connection...\n")
+
+
+def test_sensor_accepts_grounded_quote_and_rejects_invented_one(monkeypatch):
+    outcomes = ("auth_errors", "config_errors", "connection_errors", "storage_errors", "crash_errors", "clean")
+    monkeypatch.setattr(sensors, "json_call", lambda *a, **k: sensors._Reading(
+        label="config_errors", evidence="INF cmd/geo/main.go:36 > Read database URL: mongodb-geo:27777"))
+    label, meta = sensors.read_log(GEO_LOG, "geo", outcomes, "")
+    assert label == "config_errors" and meta["status"] == "accepted"      # ANSI codes stripped before matching
+    monkeypatch.setattr(sensors, "json_call", lambda *a, **k: sensors._Reading(
+        label="auth_errors", evidence="authentication failed for user geo"))
+    label, meta = sensors.read_log(GEO_LOG, "geo", outcomes, "")
+    assert label is None and meta["status"] == "rejected_unquoted"        # quote not in the log
+
+
+def test_agent_uses_llm_reading_with_its_own_noise_and_keeps_regex_label():
+    def fake_read(raw, svc, outcomes, describe):
+        return "config_errors", {"sensor": "llm", "status": "accepted"}
+
+    def gen(problem, services, probes, observations, findings=None):
+        mk = lambda i, ft, sig: BenchHypothesis(f"H{i}", "geo", ft, "Application", "", 0.5,
+                                                {"log_signature:geo": sig})
+        return [mk(1, "Misconfiguration", "config_errors"), mk(2, "Code Defect", "crash_errors"),
+                hg.no_fault_hypothesis(probes)], {}
+    agent = VoIAgent("voi", generate=gen, log_reader="llm", read_log=fake_read)
+    agent.init_context(PROBLEM)
+    agent.step(""); agent.step(SVC_OUT)
+    first = agent.step(PODS_OUT)
+    assert "get_logs" in first                       # VoI asks for the discriminating log probe
+    agent.step("INF Read database URL: mongodb-geo:27777")
+    step = [s for s in agent.inv.steps if s.probe == "log_signature:geo"][0]
+    assert step.outcome == "config_errors" and step.eps == sensors.LLM_READ_EPS
+    assert step.sensor["regex_label"] == "clean"     # what the regex alone would have said
+    assert agent.inv.leader().fault_type == "Misconfiguration"
