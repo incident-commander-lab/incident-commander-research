@@ -524,3 +524,10 @@ def test_service_port_mismatch_check():
     assert label_service_ports("T 9999\nuser-service-6c9b8d7f5-abcde   <none>", "user-service") == "ports_ok"  # no declared ports: no evidence
     call = TEMPLATES["service_ports"].call("test-social-network", "user-service")
     assert call.startswith('exec_shell("') and call.endswith('")') and call.count('"') == 2   # parses as one string arg
+
+
+def test_detection_success_is_read_from_detection_accuracy():
+    from ic.bench import analyze
+    assert analyze.success({"aiopslab_results": {"Detection Accuracy": "Correct", "TTD": 51}})
+    assert not analyze.success({"aiopslab_results": {"Detection Accuracy": "Incorrect"}})
+    assert analyze.success({"aiopslab_results": {"success": True}})

@@ -52,7 +52,14 @@ def actions_of(r: dict) -> list[str]:
 
 
 def success(r: dict) -> bool:
-    return bool((r.get("aiopslab_results") or {}).get("success"))
+    """AIOpsLab's grader writes `success` for localization and analysis, but only
+    `Detection Accuracy: Correct|Incorrect` for detection."""
+    a = r.get("aiopslab_results") or {}
+    if "success" in a:
+        return bool(a["success"])
+    if "Detection Accuracy" in a:
+        return a["Detection Accuracy"] == "Correct"
+    return False
 
 
 def summarise(rows: list[dict]) -> list[dict]:
