@@ -103,6 +103,13 @@ def _provider(name: str) -> Provider:
         # Open model served by vLLM (OpenAI-compatible). Base URL ends at /v1.
         return Provider("vllm", os.environ.get("IC_VLLM_MODEL", "Qwen/Qwen3-32B"),
                         os.environ.get("IC_VLLM_BASE_URL"), "IC_VLLM_API_KEY", api="openai")
+    if name.startswith("gemini:"):
+        # Google AI Studio (Gemini API) via its OpenAI-compatible endpoint. Hosts
+        # closed Gemini models and open-weights Gemma models. Free tier: requests
+        # over quota are rejected (429), not billed, unless billing is enabled.
+        return Provider(name, name.split(":", 1)[1],
+                        "https://generativelanguage.googleapis.com/v1beta/openai",
+                        "GEMINI_API_KEY", api="openai")
     if name.startswith("openrouter_oai:"):
         # OpenRouter via its OpenAI-compatible endpoint. Reasoning models (Nemotron,
         # Qwen3.x, Dots…) return separate reasoning there instead of breaking the
@@ -127,8 +134,9 @@ def active_chain() -> list[Provider]:
     if primary == "openrouter_models":
         # IC_OPENROUTER_MODELS="model-a,model-b,model-c": try in order (development).
         # With IC_STRICT_PROVIDER=1 only the first is used (experiments).
+        # Entries may be prefixed "gemini:" to use Google AI Studio instead of OpenRouter.
         models = [m.strip() for m in os.environ.get("IC_OPENROUTER_MODELS", "").split(",") if m.strip()]
-        chain = [_provider(f"openrouter_oai:{m}") for m in models]
+        chain = [_provider(m if m.startswith("gemini:") else f"openrouter_oai:{m}") for m in models]
         return chain[:1] if os.environ.get("IC_STRICT_PROVIDER") == "1" else chain
     if os.environ.get("IC_STRICT_PROVIDER") == "1":  # experiments: one model, no failover
         return [_provider(primary)]
@@ -174,9 +182,14 @@ def _reasoning_opts(provider: Provider) -> dict:
     19-service AIOpsLab prompt, an explicit effort="low" switched reasoning ON for
     Laguna S 2.1 (10k reasoning tokens, 181 s vs 551 tokens, 11 s off).
     IC_REASONING_EFFORT=low|medium|high opts back in; =default sends nothing."""
+    effort = os.environ.get("IC_REASONING_EFFORT", "off")
+    if provider.name.startswith("gemini:"):
+        # Gemini's OpenAI-compatible API takes reasoning_effort; Gemma has no thinking.
+        if effort == "default" or "gemma" in provider.model:
+            return {}
+        return {"reasoning_effort": "none" if effort == "off" else effort}
     if not provider.name.startswith("openrouter_oai:"):
         return {}
-    effort = os.environ.get("IC_REASONING_EFFORT", "off")
     if effort == "default":
         return {}
     if effort == "off":
