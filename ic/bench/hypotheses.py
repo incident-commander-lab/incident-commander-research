@@ -29,6 +29,13 @@ FAULT_TYPES = ("Misconfiguration", "Code Defect", "Authentication Issue",
                "Network/Storage Issue", "Operation Error", "Dependency Problem")
 NO_FAULT_ID = "H0"
 
+# Compact stand-in for the full JSON schema in the prompt (~100 vs ~330 tokens).
+SCHEMA_HINT = (
+    'Shape: {"hypotheses": [{"id": "H1", "service": "<from the service list>", '
+    '"system_level": "<level>", "fault_type": "<type>", "claim": "<one sentence>", '
+    '"confidence": 0.0-1.0, "predictions": [{"probe": "<template>:<service>", '
+    '"outcome": "<label>"}]}]} with 2 to 6 hypotheses.')
+
 
 class _Prediction(BaseModel):
     probe: str = Field(description="Probe key 'template:service' from the catalog")
@@ -129,7 +136,8 @@ def generate(problem: str, services: list[str], probes: dict[str, ProbeInstance]
              ) -> tuple[list[BenchHypothesis], dict]:
     """LLM-proposed hypotheses plus the no-fault hypothesis. Returns (hyps, meta)."""
     resp = json_call(_system_prompt(), _user_prompt(problem, services, observations, findings),
-                     _Response, max_tokens=12000, temperature=0.3)
+                     _Response, max_tokens=12000, temperature=0.3,
+                     schema_hint=SCHEMA_HINT)
     hyps, meta = _clean(resp, services, probes)
     return hyps + [no_fault_hypothesis(probes)], meta
 

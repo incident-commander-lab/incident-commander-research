@@ -377,3 +377,63 @@ def test_agent_uses_llm_reading_with_its_own_noise_and_keeps_regex_label():
     assert step.outcome == "config_errors" and step.eps == sensors.LLM_READ_EPS
     assert step.sensor["regex_label"] == "clean"     # what the regex alone would have said
     assert agent.inv.leader().fault_type == "Misconfiguration"
+
+
+# --------------------------------------------------------------------------- #
+# Token cuts (from the pilot's revoke_auth run: 4 LLM calls, 2 of them wasted)
+# --------------------------------------------------------------------------- #
+def test_knock_on_symptom_does_not_trigger_regeneration():
+    probes = instances(["geo", "frontend"])
+    hyps = [BenchHypothesis("H1", "geo", "Authentication Issue", "Application", "", 0.6,
+                            {"log_signature:geo": "auth_errors"}),
+            BenchHypothesis("H2", "geo", "Misconfiguration", "Application", "", 0.4,
+                            {"log_signature:geo": "config_errors"})]
+    inv = Investigation(hyps, probes)
+    inv.observe("log_signature:frontend", "connection_errors")   # caller suffers because geo is down
+    assert not inv.surprise()                                     # implied default, not an explicit prediction
+    inv.observe("log_signature:geo", "clean")
+    assert inv.surprise()                                         # explicit predictions all failed
+
+
+def test_pilot_replay_uses_two_llm_calls_not_four():
+    calls = {"generate": 0, "read": 0}
+
+    def gen(problem, services, probes, observations, findings=None):
+        calls["generate"] += 1
+        mk = lambda i, ft, sig, p: BenchHypothesis(f"H{i}", "geo", ft, "Application", "", p,
+                                                   {"log_signature:geo": sig})
+        return [mk(1, "Authentication Issue", "auth_errors", 0.4), mk(2, "Misconfiguration", "config_errors", 0.35),
+                mk(3, "Code Defect", "crash_errors", 0.25), hg.no_fault_hypothesis(probes)], {}
+
+    def read(raw, svc, outcomes, describe):
+        calls["read"] += 1
+        return "auth_errors", {"sensor": "llm", "status": "accepted"}
+
+    replies = {"geo": "INF Initializing DB connection...\nINF reading collection",       # regex: clean
+               "frontend": "dial tcp geo:8083: connection refused\nrpc error: i/o timeout"}  # regex: connection_errors
+    agent = VoIAgent("voi", generate=gen, log_reader="llm", read_log=read)
+    agent.init_context(PROBLEM)
+    action = agent.step(""); action = agent.step(SVC_OUT); action = agent.step(PODS_OUT)
+    for _ in range(12):
+        call = action.strip("`\n ")
+        if call.startswith("submit"):
+            break
+        svc = call.split('", "')[1].rstrip('")') if call.startswith("get_logs") else None
+        action = agent.step(replies.get(svc, "") if svc else fake_env(call))
+    assert call == 'submit(["geo"])'
+    assert calls == {"generate": 1, "read": 1}       # was 2 + 2 in the pilot
+    assert agent.inv.leader().fault_type == "Authentication Issue"
+
+
+def test_log_reader_skips_logs_the_regex_already_labels():
+    reads = []
+    agent = VoIAgent("voi", generate=fake_generate, log_reader="llm",
+                     read_log=lambda *a: (reads.append(a[1]), ("auth_errors", {"status": "accepted"}))[1])
+    agent.init_context(PROBLEM)
+    agent.step(""); agent.step(SVC_OUT); agent.step(PODS_OUT)
+    agent.pending = "log_signature:frontend"
+    agent._observe_pending("dial tcp geo:8083: connection refused\nrpc error: i/o timeout")
+    assert reads == []                                # regex said connection_errors: no LLM call
+    agent.pending = "log_signature:geo"
+    agent._observe_pending("INF Initializing DB connection...")
+    assert reads == ["geo"]                           # regex said clean: LLM reads it

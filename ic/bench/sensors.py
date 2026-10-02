@@ -23,7 +23,7 @@ from pydantic import BaseModel, Field
 from ..llm import json_call
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m|\[[0-9;]*m")
-MAX_LOG_CHARS = 6000   # keep the END of the log: crashes and last config lines live there
+MAX_LOG_CHARS = 3000   # keep the END of the log: crashes and last config lines live there
 LLM_READ_EPS = 0.15    # measurement error for a grounded LLM reading (regex logs: 0.25)
 
 

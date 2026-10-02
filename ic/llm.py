@@ -300,6 +300,7 @@ def json_call(
     *,
     max_tokens: int = 1500,
     temperature: float = 0.2,
+    schema_hint: str | None = None,
 ) -> T:
     """
     Call the active provider chain and return an instance of `schema`.
@@ -309,10 +310,13 @@ def json_call(
     - Fails over to the next provider in the chain if the retry also fails.
     - Raises RuntimeError only if EVERY provider fails the contract.
     """
+    # Callers with large schemas pass a compact example instead of the full JSON
+    # schema (hundreds of tokens per call); validation is still against `schema`.
     schema_hint = (
         "Respond with a SINGLE JSON object and nothing else — no prose, no markdown, "
-        "no code fences. It must validate against this JSON schema:\n"
-        f"{json.dumps(schema.model_json_schema(), separators=(',', ':'))}"
+        "no code fences. " + (schema_hint or
+        f"It must validate against this JSON schema:\n"
+        f"{json.dumps(schema.model_json_schema(), separators=(',', ':'))}")
     )
     full_system = f"{system}\n\n{schema_hint}"
 

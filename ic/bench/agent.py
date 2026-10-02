@@ -140,7 +140,12 @@ class VoIAgent:
     def _observe_pending(self, state: str) -> None:
         probe = self.inv.probes[self.pending]
         label, eps, sensor = probe.label(state), None, None
-        if probe.template.name == "log_signature" and self.log_reader == "llm":
+        # "llm": ask the LLM only where the regex is blind — it reads "clean". A regex hit
+        # (e.g. connection_errors) is already a concrete label; re-reading it was a wasted
+        # call in the pilot. "llm_always" re-reads every log (ablation).
+        needs_llm = (self.log_reader == "llm_always"
+                     or (self.log_reader == "llm" and label == probe.outcomes[-1]))
+        if probe.template.name == "log_signature" and needs_llm:
             llm_label, sensor = self._read_log(state, probe.service, probe.outcomes,
                                                probe.template.describe)
             sensor["regex_label"] = label

@@ -142,8 +142,12 @@ class Investigation:
         a sign the true cause is not in the list (triggers re-generation)."""
         if not self.steps:
             return False
+        # Only EXPLICIT predictions count. The implied "other services look healthy"
+        # default is a soft assumption: a knock-on symptom on a caller (frontend logging
+        # connection errors because geo is down) must not discard the whole list. In the
+        # pilot it triggered a needless re-generation call.
         for h in self.hyps.values():
-            if all(self._predict(h, s.probe) in (None, s.outcome) for s in self.steps):
+            if all(h.predictions.get(s.probe) in (None, s.outcome) for s in self.steps):
                 return False
         return True
 
