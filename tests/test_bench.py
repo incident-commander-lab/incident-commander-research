@@ -503,3 +503,11 @@ def test_react_out_of_steps_still_records_usage(monkeypatch):
     r = agent.finalize()
     assert r["stop_reason"] == "budget" and r["probes_run"] == 3
     assert r["llm_usage"]["input_tokens"] == 1500 and len(r["actions"]) == 3
+
+
+def test_llm_chooser_budget_ignores_free_readings(monkeypatch):
+    monkeypatch.setattr(llm, "json_call", lambda *a, **k: baselines._Choice(action="probe", probe="endpoints:geo"))
+    agent = baselines.LLMChooserAgent(generate=fake_generate, max_probes=2)
+    agent.init_context(PROBLEM)
+    agent.step(""); agent.step(SVC_OUT)
+    assert "endpoints geo" in agent.step(PODS_OUT)    # 4 free readings must not exhaust a budget of 2
