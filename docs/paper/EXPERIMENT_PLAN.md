@@ -1,29 +1,31 @@
 # Experiment Plan
 
-**Working title:** From Guessing to Experiment Selection: Value-of-Information-Guided LLM Agents for Incident Diagnosis
+**Working title:** Decision-Theoretic Troubleshooting, Revived: LLM-Built Hypothesis Models with Expected-Utility Decisions for Cloud Incidents
 
 ## Central question
 
-Can separating **hypothesis generation** (an LLM proposes candidate root causes) from **experiment selection** (a value-of-information policy decides what to observe next, and when to stop) reduce wasted investigation while keeping or improving diagnostic accuracy?
+Classical decision-theoretic troubleshooting chose the next observation, repair or configuration experiment by expected cost (Heckerman, Breese and Rommelse 1995; Breese and Heckerman 1996), and picked the most informative probe in distributed systems (Rish et al. 2005). It needed a Bayesian model hand-built for each system, which never kept pace with cloud systems that change weekly. LLM agents removed the model-building step but dropped the decision theory, and are documented to over-investigate, choose invalid recovery actions (R2Act: 36% valid) and abstain poorly (AgentAbstain: 59.5% at best).
 
-The model is the experimental **instrument**. The variable under study is the **decision architecture**: who chooses the next observation, and who decides to stop.
+**Question:** if an LLM builds the hypothesis model at runtime (candidate root causes, plus what each predicts every probe will show) and a fixed expected-utility rule outside the LLM decides whether to observe, intervene reversibly, escalate or stop, does incident response become more efficient and safer than letting the LLM decide?
 
-Novelty wording: we investigate explicit VoI-based experiment selection for LLM-driven incident diagnosis. We do **not** claim to be the first to apply VoI to diagnosis (cf. Rish 2005 on probing; guarded tool-using agents for incident response; LLM-assisted Bayesian experiment design in science). The related-work section establishes how close prior combinations come.
+The model is the instrument. The variable under study is the decision architecture: who chooses the next step, and who decides to stop or act.
+
+**Novelty wording.** The decision theory is not ours, and the paper credits it. What we claim is the combination: LLM-instantiated hypothesis models feeding the classical decision rule, applied to cloud incidents, with reversibility and customer-impact cost in the utility, evaluated against LLM-directed agents. Closest recent neighbours, all cited: GIRA (expected-utility action gate with no information term), CIPHER-A (LLM-predicted outcomes gate actions, security), Wang et al. 2025 (escalation on LLM confidence < 0.7), Model Discovery Agent (LLM proposes plus VoI, science), Belief-State Engine (external belief, but the LLM still chooses actions). Full screen of 41 works: https://claude.ai/artifact/UhSAj4s9Ccx93vCbfV8Yuo
 
 ## Research questions
 
-| | Question | Main comparison | Status |
+| | Question | Where | Status |
 |---|---|---|---|
-| **RQ1 (core)** | Does VoI-based experiment selection improve investigation efficiency without reducing diagnostic accuracy? | Plain LLM agent vs LLM + VoI (with ablations) | Harness built and piloted |
-| **RQ2** | When does a *reversible* remediation have more combined mitigation-plus-information value than further observation? | Diagnose-first vs act-to-learn, sweeping customer impact | Planned |
-| **RQ3** | How robust is decision-theoretic investigation to corrupted telemetry? | Plain LLM vs LLM + VoI, clean vs poisoned observations | Planned (robustness section) |
+| **RQ1 (core)** | Does the decision rule beat LLM self-direction at choosing what to observe and when to stop, without losing accuracy? | AIOpsLab, 75 non-mitigation problems | Harness built and piloted |
+| **RQ2** | Does the same rule decide well among acting, holding back and escalating, and does its behaviour shift sensibly with customer impact? | shop-svc: paired incidents (deploy causal / deploy not causal / ambiguous) at several customer-impact levels | To build |
+| **RQ3 (stretch)** | Does cross-source disagreement push the agent to escalate when telemetry is poisoned? | shop-svc with manipulated telemetry | Optional |
 
 ## Hypotheses (stated before the main runs)
 
 - **H1 (efficiency):** VoI selection uses fewer paid probes and fewer *decision* LLM calls than an LLM choosing its own next step, at equal or better accuracy.
 - **H1a (stopping):** The VoI stopping rule removes long, repetitive failed trajectories without raising the premature-stop rate.
 - **H1b (calibration):** The posterior is better calibrated (lower Brier score) than the LLM's self-directed stopping.
-- **H2 (act-to-learn):** As customer-impact cost rises, a policy that values mitigation and information jointly reduces time-to-mitigation without increasing harmful actions.
+- **H2 (act, hold back, escalate):** The expected-utility rule reaches higher paired action accuracy than an LLM actor, a GIRA-style utility without an information term, and a confidence-threshold escalator. As customer impact rises it shifts from observing to reversible intervention earlier, without more harmful actions.
 - **H3 (robustness):** Decision-theoretic selection reduces repeated investigation under misleading telemetry, but stays vulnerable to systematically corrupted observations (an expected boundary condition, reported either way).
 
 Negative or mixed results are reported as they are.
@@ -59,6 +61,27 @@ All conditions use the **same model, tools, incidents, initial evidence and step
 
 Further ablations: log reader regex vs LLM (`IC_LOG_READER`), λ sweep, discovery evidence on or off.
 
+## Conditions (RQ2, paired incidents in shop-svc)
+
+Each incident comes in a pair (or triple) that differs by one controlled change, after AgentAbstain's design, so an always-act or always-hold policy cannot exceed 50%:
+
+| Variant | Evidence | Correct decision |
+|---|---|---|
+| Deploy causal | error rate up, recent deploy, dependencies healthy, rollback restores health | roll back (reversible) |
+| Deploy not causal | same alert and recent deploy, but the fault is elsewhere | do not roll back; keep observing or fix the real cause |
+| Ambiguous | contradictory evidence, no safe action | escalate |
+
+Each pair runs at several customer-impact levels (Incident Commander's CIS).
+
+| ID | Who decides | Escalates when |
+|---|---|---|
+| A2 | LLM actor (ReAct with action tools) | the LLM decides to |
+| G | GIRA-style utility: impact reduction − λ·risk − μ·human cost, **no information term** | no action has positive utility |
+| W | LLM proposes; act if LLM confidence ≥ 0.7 (Wang et al. 2025) | confidence < 0.7 |
+| **C2** | **ours: EIG + mitigation − λ·cost − μ·risk over the belief** | max utility of every autonomous action ≤ utility of escalation |
+
+Metrics: paired action accuracy, harmful-action rate, correct-escalation rate, time to mitigation, customer impact accumulated (CIS × time), probes before acting. The OPA policy layer runs under every condition; it enforces permissions and is not the variable.
+
 ## Metrics (`python -m ic.bench.analyze`)
 
 | Metric | Purpose |
@@ -80,15 +103,15 @@ Further ablations: log reader regex vs LLM (`IC_LOG_READER`), λ sweep, discover
 
 ## Models
 
-The model is frozen per experiment, and runs are strict single-model (no fallback; every row records the model that answered).
+Frozen per experiment, strict single-model runs (no fallback; every result row records the model that answered).
 
 | Role | Model | Why |
 |---|---|---|
-| Reproducibility anchor | **Qwen3 8B, local via Ollama** | free, unlimited, open weights, runs on a 16 GB laptop |
+| Main, reproducible | **Qwen3 8B, local via Ollama** (reasoning off) | free, unlimited, open weights, runs on a 16 GB laptop; 3/3 valid hypothesis sets on the real 19-service prompt |
 | Open models, other labs | Laguna S 2.1, Nemotron 3 Ultra, Gemma 4 | the result should not depend on one lab |
-| Closed reference | Gemini 3 Flash | "also holds on a frontier closed model" |
+| Closed reference | Gemini 3 Flash | "also holds on a frontier closed model" (free tier is 20 requests/day, so small runs only) |
 
-Log-reading quality varies by model. On the misconfiguration log, Laguna and Gemini 3 Flash spotted the bad port and Gemma 4 26B did not. It is reported per model.
+Log-reading quality varies by model: Laguna and Gemini 3 Flash spot the wrong-port clue in misconfig_app; Gemma 4 26B and Qwen3 8B do not. Reported per model; the regex reader is the fallback.
 
 ## Repetitions and statistics
 
@@ -102,9 +125,8 @@ Log-reading quality varies by model. On the misconfiguration log, Laguna and Gem
 
 ## Infrastructure
 
-- `infra/bench-host.yaml`: one EC2 host, with no inbound ports, an idle auto-stop and a gross-cost budget alert.
-- The stack is deleted between work sessions; results are copied locally first.
-- Local model reached from the host over a tunnel (Tailscale or an SSH reverse tunnel over SSM).
+- `infra/bench-host.yaml`: one EC2 host (r7i.xlarge, 4 vCPU / 32 GiB, fits a 5-vCPU quota). No inbound ports; idle auto-stop; gross-cost budget alert. Deleted between work sessions; results are copied locally first.
+- **Local model over a reverse SSH tunnel through SSM.** The laptop runs Ollama on 127.0.0.1:11434. `ssh -R 11434:127.0.0.1:11434` over an `AWS-StartSSHSession` proxy makes it appear at 127.0.0.1:11434 on the host only (no port opens to the internet on either side). The agent on the host uses `IC_PROVIDER=openrouter_models IC_OPENROUTER_MODELS=ollama:qwen3:8b`. No API keys are needed on the host for local-model runs.
 
 ## Status and pilot lessons (2026-10-02)
 
