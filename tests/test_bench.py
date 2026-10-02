@@ -474,7 +474,7 @@ def test_higher_lambda_never_runs_more_probes():
 def test_analysis_metrics():
     from ic.bench import analyze
     lo, hi = analyze.wilson(8, 10)
-    assert 0.44 < lo < 0.45 and 0.94 < hi < 0.95
+    assert 0.49 < lo < 0.491 and 0.943 < hi < 0.944     # Wilson 95% for 8/10: [0.490, 0.943]
     win = {"aiopslab_results": {"success": True}}
     loss = {"aiopslab_results": {"success": False}}
     rows = [
