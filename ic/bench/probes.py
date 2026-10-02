@@ -243,11 +243,14 @@ def instances(services: list[str]) -> dict[str, ProbeInstance]:
 
 
 def parse_services(kubectl_get_svc: str) -> list[str]:
-    """Service names from `kubectl get svc -n <ns>` output (header optional)."""
+    """Service names from `kubectl get svc -n <ns>` output. Only real table rows
+    count: NAME TYPE CLUSTER-IP ... where TYPE is a Service type. (AIOpsLab prefixes
+    its first reply with 'Please take the next action', which once became a
+    'service' called 'Please'.)"""
+    types = {"ClusterIP", "NodePort", "LoadBalancer", "ExternalName"}
     names = []
     for ln in kubectl_get_svc.splitlines():
         cols = ln.split()
-        if not cols or cols[0] in ("NAME",) or cols[0].startswith("Error"):
-            continue
-        names.append(cols[0])
+        if len(cols) >= 2 and cols[1] in types:
+            names.append(cols[0])
     return names

@@ -330,3 +330,8 @@ def test_parser_takes_first_valid_object_and_ignores_trailing_text():
     assert llm._parse_into(M, '{"a": 1}\n{"a": 2}').a == 1                       # two objects
     assert llm._parse_into(M, '{"a": 3}\n\nNote: H1 is most likely.').a == 3     # trailing prose
     assert llm._parse_into(M, 'Example: {"b": 0}. Answer: {"a": 4} done').a == 4  # skip non-matching
+
+
+def test_parse_services_ignores_aiopslab_preamble():
+    out = "Please take the next action\n" + SVC_OUT
+    assert parse_services(out) == SERVICES
