@@ -48,9 +48,10 @@ def main() -> None:
                 continue
             agent.init_context(problem_desc, instructions, apis)
             final = asyncio.run(orch.start_problem(max_steps=args.max_steps))
-            row = {"problem": pid, "seed": seed, "policy": args.policy,
-                   "aiopslab_results": final.get("results") if isinstance(final, dict) else None,
-                   **agent.result}
+            # agent.result also carries a "policy" key (the Investigation's selection
+            # rule, "voi" for the LLM-chooser too); the run's condition must win.
+            row = {**agent.result, "problem": pid, "seed": seed, "policy": args.policy,
+                   "aiopslab_results": final.get("results") if isinstance(final, dict) else None}
             with open(args.out, "a") as f:
                 f.write(json.dumps(row, default=str) + "\n")
             print(f"{pid} seed={seed}: {agent.result.get('submission')} "
