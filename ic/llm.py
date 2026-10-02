@@ -151,13 +151,14 @@ def llm_enabled() -> bool:
 # Token accounting
 # --------------------------------------------------------------------------- #
 USAGE = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "contract_failures": 0,
-         "answered_by": []}
+         "retries": 0, "answered_by": []}
 
 
 def reset_usage() -> dict:
     """Zero the counters and return the previous totals."""
     prev = dict(USAGE)
-    USAGE.update(calls=0, input_tokens=0, output_tokens=0, contract_failures=0, answered_by=[])
+    USAGE.update(calls=0, input_tokens=0, output_tokens=0, contract_failures=0, retries=0,
+                 answered_by=[])
     return prev
 
 
@@ -183,21 +184,46 @@ def _reasoning_opts(provider: Provider) -> dict:
     return {"reasoning": {"effort": effort}}
 
 
+_RETRY_STATUS = {429, 500, 502, 503, 504}
+
+
+def _post_with_retry(url: str, headers: dict, body: dict):
+    """POST to an OpenAI-compatible endpoint, waiting out rate limits and transient
+    upstream errors (free OpenRouter models 429 often). Honours Retry-After; else
+    backs off 15 → 30 → 60 → 120 s. Stays on the SAME model: experiments must not
+    silently switch models."""
+    import httpx
+    import time as _time
+    timeout = float(os.environ.get("IC_LLM_TIMEOUT", "120"))
+    waits = [15, 30, 60, 120]
+    for attempt in range(len(waits) + 1):
+        try:
+            r = httpx.post(url, headers=headers, json=body, timeout=timeout)
+            if r.status_code not in _RETRY_STATUS:
+                r.raise_for_status()
+                return r
+            reason = f"HTTP {r.status_code}"
+            wait = float(r.headers.get("retry-after") or waits[min(attempt, len(waits) - 1)])
+        except httpx.TimeoutException:
+            reason, wait = "timeout", waits[min(attempt, len(waits) - 1)]
+        if attempt == len(waits):
+            raise RuntimeError(f"{body.get('model')}: gave up after {attempt + 1} tries ({reason})")
+        USAGE["retries"] = USAGE.get("retries", 0) + 1
+        _time.sleep(min(wait, 300))
+
+
 def _openai_chat(provider: Provider, system: str, user: str,
                  max_tokens: int, temperature: float) -> str:
     """One call to an OpenAI-compatible /chat/completions endpoint (vLLM)."""
-    import httpx  # ships with the anthropic SDK
     key = os.environ.get(provider.api_key_env) or "EMPTY"
-    r = httpx.post(
+    r = _post_with_retry(
         f"{provider.base_url.rstrip('/')}/chat/completions",
-        headers={"Authorization": f"Bearer {key}"},
-        json={"model": provider.model, "max_tokens": max_tokens, "temperature": temperature,
-              "messages": [{"role": "system", "content": system},
-                           {"role": "user", "content": user}],
-              **_reasoning_opts(provider)},
-        timeout=float(os.environ.get("IC_LLM_TIMEOUT", "120")),
+        {"Authorization": f"Bearer {key}"},
+        {"model": provider.model, "max_tokens": max_tokens, "temperature": temperature,
+         "messages": [{"role": "system", "content": system},
+                      {"role": "user", "content": user}],
+         **_reasoning_opts(provider)},
     )
-    r.raise_for_status()
     body = r.json()
     u = body.get("usage") or {}
     _record(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))
@@ -325,17 +351,14 @@ def chat(system: str, messages: list[dict], *, max_tokens: int = 2000,
     a baseline must stay on one model, so the first provider in the chain is used."""
     provider = active_chain()[0]
     if provider.api == "openai":
-        import httpx
         key = os.environ.get(provider.api_key_env) or "EMPTY"
-        r = httpx.post(
+        r = _post_with_retry(
             f"{provider.base_url.rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {key}"},
-            json={"model": provider.model, "max_tokens": max_tokens, "temperature": temperature,
-                  "messages": [{"role": "system", "content": system}, *messages],
-                  **_reasoning_opts(provider)},
-            timeout=float(os.environ.get("IC_LLM_TIMEOUT", "120")),
+            {"Authorization": f"Bearer {key}"},
+            {"model": provider.model, "max_tokens": max_tokens, "temperature": temperature,
+             "messages": [{"role": "system", "content": system}, *messages],
+             **_reasoning_opts(provider)},
         )
-        r.raise_for_status()
         body = r.json()
         u = body.get("usage") or {}
         _record(u.get("prompt_tokens", 0), u.get("completion_tokens", 0))

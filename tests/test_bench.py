@@ -304,3 +304,19 @@ def test_parser_accepts_prose_around_json():
         a: int
     assert llm._parse_into(M, 'Looking at the pods, geo is failing.\n{"a": 1}\nThat is my answer.').a == 1
     assert llm._parse_into(M, '```json\n{"a": 2}\n```').a == 2
+
+
+def test_rate_limit_is_retried_on_same_model(monkeypatch):
+    import httpx
+    calls = []
+
+    def fake_post(url, headers, json, timeout):
+        calls.append(json["model"])
+        req = httpx.Request("POST", url)
+        if len(calls) == 1:
+            return httpx.Response(429, headers={"retry-after": "0"}, request=req)
+        return httpx.Response(200, json={"choices": [{"message": {"content": "{}"}}]}, request=req)
+    monkeypatch.setattr(httpx, "post", fake_post)
+    llm.reset_usage()
+    r = llm._post_with_retry("https://x/v1/chat/completions", {}, {"model": "m:free"})
+    assert r.status_code == 200 and calls == ["m:free", "m:free"] and llm.USAGE["retries"] == 1
