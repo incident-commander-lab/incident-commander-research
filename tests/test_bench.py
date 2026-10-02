@@ -491,3 +491,15 @@ def test_analysis_metrics():
     assert c["budget_hits"] == 1
     assert abs(c["brier"] - ((0.9 - 1) ** 2 + (0.8 - 0) ** 2 + (0.5 - 0) ** 2) / 3) < 1e-9
     assert a["repeated_actions"] == 0.5
+
+
+def test_react_out_of_steps_still_records_usage(monkeypatch):
+    monkeypatch.setattr(llm, "chat", lambda *a, **k: (llm._record(500, 5), '```\nexec_shell("kubectl get pods")\n```')[1])
+    agent = baselines.ReActAgent()
+    agent.init_context(PROBLEM, "", {})
+    for _ in range(3):
+        asyncio.run(agent.get_action("state"))
+    assert agent.result == {}                         # never submitted
+    r = agent.finalize()
+    assert r["stop_reason"] == "budget" and r["probes_run"] == 3
+    assert r["llm_usage"]["input_tokens"] == 1500 and len(r["actions"]) == 3

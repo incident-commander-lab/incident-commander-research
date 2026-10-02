@@ -16,6 +16,7 @@ import argparse
 import asyncio
 import json
 import os
+import sys
 
 from .. import llm
 from .agent import task_type
@@ -49,6 +50,8 @@ def main() -> None:
                 continue
             agent.init_context(problem_desc, instructions, apis)
             final = asyncio.run(orch.start_problem(max_steps=args.max_steps))
+            if hasattr(agent, "finalize"):
+                agent.finalize()
             # agent.result also carries a "policy" key (the Investigation's selection
             # rule, "voi" for the LLM-chooser too); the run's condition must win.
             chain = llm.active_chain()
@@ -62,5 +65,15 @@ def main() -> None:
                   f"{agent.result.get('llm_usage', {}).get('input_tokens', 0)}")
 
 
+def _exit_hard() -> None:
+    """AIOpsLab's get_metrics/get_traces leave `kubectl port-forward` children running,
+    which keep this process alive after the run. Kill our children and exit."""
+    import subprocess
+    subprocess.run(["pkill", "-P", str(os.getpid())], check=False)
+    os._exit(0)
+
+
 if __name__ == "__main__":
     main()
+    sys.stdout.flush()
+    _exit_hard()

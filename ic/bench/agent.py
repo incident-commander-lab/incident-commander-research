@@ -153,6 +153,13 @@ class VoIAgent:
                 label, eps = llm_label, sensors.LLM_READ_EPS
         self.inv.observe(self.pending, label, raw=state, eps=eps, sensor=sensor)
 
+    def finalize(self) -> dict:
+        """Called by the runner after the episode, in case it ended without a submission."""
+        if not self.result and self.inv is not None:
+            self.inv.stop_reason = self.inv.stop_reason or "budget"
+            self._finish()
+        return self.result
+
     def _give_up(self, error: Exception) -> str:
         """No hypotheses could be generated. Submit the 'nothing found' answer so
         AIOpsLab scores the problem (as a failure) and runs its fault recovery."""

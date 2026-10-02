@@ -77,10 +77,19 @@ class ReActAgent:
             self._finish(call)
         return _block(call)
 
+    def finalize(self) -> dict:
+        """Called by the runner after AIOpsLab stops the episode. If the agent never
+        submitted (it ran out of steps), still record its calls, tokens and actions:
+        non-termination is a result, not missing data."""
+        if not self.result:
+            self._finish(None)
+            self.result["stop_reason"] = "budget"
+        return self.result
+
     def _finish(self, call: str):
         self.result = {
             "policy": self.policy, "task": self.task, "submission": call,
-            "probes_run": self.steps - 1, "format_errors": self.format_errors,
+            "probes_run": self.steps - (1 if call else 0), "format_errors": self.format_errors,
             "actions": [a for a in self.actions if not a.startswith("submit")],
             "llm_usage": dict(llm.USAGE),
             "wall_seconds": round(time.monotonic() - self.t0, 2),
