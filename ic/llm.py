@@ -262,16 +262,22 @@ def _strip_fences(s: str) -> str:
 
 def _parse_into(schema: Type[T], raw: str) -> T:
     """Parse model text into the Pydantic schema, or raise. Open models often wrap
-    the JSON in a sentence of prose; fall back to the outermost {...} span."""
+    the JSON in prose, or keep writing after it (a second object, an explanation).
+    So: try the whole text, then decode one object at a time from each '{' and
+    return the first that validates against the schema."""
     text = _strip_fences(raw)
     try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start < 0 or end <= start:
-            raise
-        data = json.loads(text[start:end + 1])
-    return schema.model_validate(data)
+        return schema.model_validate(json.loads(text))
+    except (json.JSONDecodeError, ValidationError) as first_error:
+        decoder = json.JSONDecoder()
+        pos = text.find("{")
+        while pos >= 0:
+            try:
+                obj, end = decoder.raw_decode(text, pos)
+                return schema.model_validate(obj)
+            except (json.JSONDecodeError, ValidationError):
+                pos = text.find("{", pos + 1)
+        raise first_error
 
 
 def json_call(

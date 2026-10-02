@@ -320,3 +320,13 @@ def test_rate_limit_is_retried_on_same_model(monkeypatch):
     llm.reset_usage()
     r = llm._post_with_retry("https://x/v1/chat/completions", {}, {"model": "m:free"})
     assert r.status_code == 200 and calls == ["m:free", "m:free"] and llm.USAGE["retries"] == 1
+
+
+def test_parser_takes_first_valid_object_and_ignores_trailing_text():
+    from pydantic import BaseModel
+
+    class M(BaseModel):
+        a: int
+    assert llm._parse_into(M, '{"a": 1}\n{"a": 2}').a == 1                       # two objects
+    assert llm._parse_into(M, '{"a": 3}\n\nNote: H1 is most likely.').a == 3     # trailing prose
+    assert llm._parse_into(M, 'Example: {"b": 0}. Answer: {"a": 4} done').a == 4  # skip non-matching
