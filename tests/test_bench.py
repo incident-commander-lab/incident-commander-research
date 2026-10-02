@@ -469,3 +469,25 @@ def test_higher_lambda_never_runs_more_probes():
             state = SVC_OUT if "get svc" in call else PODS_OUT if call.endswith(f'get pods -n {NS}")') else fake_env(call)
         counts.append(agent.result["probes_run"])
     assert counts == sorted(counts, reverse=True), counts
+
+
+def test_analysis_metrics():
+    from ic.bench import analyze
+    lo, hi = analyze.wilson(8, 10)
+    assert 0.44 < lo < 0.45 and 0.94 < hi < 0.95
+    win = {"aiopslab_results": {"success": True}}
+    loss = {"aiopslab_results": {"success": False}}
+    rows = [
+        {"policy": "voi", "model": "m", **win, "stop_reason": "no_probe_worth_its_cost", "final_confidence": 0.9,
+         "trace": [{"probe": "a", "free": False}, {"probe": "b", "free": False}]},
+        {"policy": "voi", "model": "m", **loss, "stop_reason": "no_probe_worth_its_cost", "final_confidence": 0.8,
+         "trace": [{"probe": "a", "free": False}]},                                       # stopped by own rule, wrong
+        {"policy": "voi", "model": "m", **loss, "stop_reason": "budget", "final_confidence": 0.5, "trace": []},
+        {"policy": "react", "model": "m", **win, "actions": ["x", "y", "x", "x"]},           # 2 of 4 repeats
+    ]
+    s = {r["condition"]: r for r in analyze.summarise(rows)}
+    c, a = s["C VoI (ours)"], s["A plain LLM"]
+    assert c["premature_stop"] == 0.5          # 1 wrong of 2 own-rule stops (budget stop excluded)
+    assert c["budget_hits"] == 1
+    assert abs(c["brier"] - ((0.9 - 1) ** 2 + (0.8 - 0) ** 2 + (0.5 - 0) ** 2) / 3) < 1e-9
+    assert a["repeated_actions"] == 0.5

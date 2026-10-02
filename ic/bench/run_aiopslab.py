@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 
+from .. import llm
 from .agent import task_type
 from .baselines import POLICIES, make_agent
 
@@ -50,7 +51,9 @@ def main() -> None:
             final = asyncio.run(orch.start_problem(max_steps=args.max_steps))
             # agent.result also carries a "policy" key (the Investigation's selection
             # rule, "voi" for the LLM-chooser too); the run's condition must win.
+            chain = llm.active_chain()
             row = {**agent.result, "problem": pid, "seed": seed, "policy": args.policy,
+                   "model": chain[0].model if chain else None,
                    "aiopslab_results": final.get("results") if isinstance(final, dict) else None}
             with open(args.out, "a") as f:
                 f.write(json.dumps(row, default=str) + "\n")

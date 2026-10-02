@@ -47,6 +47,7 @@ class ReActAgent:
                        f"in a single markdown code block.")
         self.task = task_type(problem_desc)
         self.messages: list[dict] = []
+        self.actions: list[str] = []   # every API call issued, for repeated-action counting
         self.steps = 0
         self.format_errors = 0
         self.t0 = time.monotonic()
@@ -71,6 +72,7 @@ class ReActAgent:
         if call is None:
             self.format_errors += 1
             call = 'exec_shell("echo no action given")'
+        self.actions.append(call)
         if call.startswith("submit"):
             self._finish(call)
         return _block(call)
@@ -79,6 +81,7 @@ class ReActAgent:
         self.result = {
             "policy": self.policy, "task": self.task, "submission": call,
             "probes_run": self.steps - 1, "format_errors": self.format_errors,
+            "actions": [a for a in self.actions if not a.startswith("submit")],
             "llm_usage": dict(llm.USAGE),
             "wall_seconds": round(time.monotonic() - self.t0, 2),
             "trace": [m["content"][:500] for m in self.messages if m["role"] == "assistant"],
