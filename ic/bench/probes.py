@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Callable
+from typing import Callable, Optional
 
 # Log signatures — which KIND of failure a service's logs show. Patterns are
 # generic SRE vocabulary (not tuned to any benchmark problem). Order matters
@@ -52,6 +52,7 @@ LOG_SIGNATURES: dict[str, re.Pattern] = {
         r"fatal error|uncaught exception|core dumped", re.I),
 }
 LOG_SIGNATURE_MIN_LINES = 2  # a category needs ≥ this many matching lines
+LOG_RECENT_LINES = 50        # judge the current state, not start-up chatter
 
 # Kubernetes event reasons → coarse category (`kubectl get events` REASON column).
 EVENT_REASONS: dict[str, tuple[str, ...]] = {
@@ -73,6 +74,7 @@ class ProbeTemplate:
     label: Callable[[str, str], str]
     eps: float = 0.05  # P(label contradicts the truth): low for kubectl state, high for log regexes
     risk: float = 0.0  # every benchmark probe is a read; interventions (Gap 2) set this
+    miss: Optional[float] = None  # P(reads healthy | a symptom was predicted): silent faults. None → eps
 
 
 @dataclass(frozen=True)
@@ -156,7 +158,9 @@ def label_log_signature(output: str, svc: str) -> str:
     or 'clean'. An AIOpsLab 'service does not exist' reply counts as a crash."""
     if output.startswith("Error:"):
         return "crash_errors"
-    lines = output.splitlines()
+    # Only the recent tail: services log transient errors while their dependencies
+    # start (frontend "connection refused" to consul in the pilot's no-fault run).
+    lines = output.splitlines()[-LOG_RECENT_LINES:]
     best, best_hits = "clean", LOG_SIGNATURE_MIN_LINES - 1
     for category, pattern in LOG_SIGNATURES.items():
         hits = sum(1 for ln in lines if pattern.search(ln))
@@ -252,7 +256,7 @@ TEMPLATES: dict[str, ProbeTemplate] = {t.name: t for t in (
         "storage (volume mount/bind), image (pull failure), probe_failure (liveness/readiness), "
         "crash_backoff (restarts, OOM, eviction), none",
         lambda ns, s: f'exec_shell("kubectl get events -n {ns} --field-selector type=Warning --no-headers | grep {s}")',
-        label_event_reason, eps=0.10),
+        label_event_reason, eps=0.10, miss=0.30),
     ProbeTemplate(
         "log_signature", ("auth_errors", "config_errors", "connection_errors", "storage_errors",
                           "crash_errors", "clean"), 2.0,
@@ -261,7 +265,7 @@ TEMPLATES: dict[str, ProbeTemplate] = {t.name: t for t in (
         "dependency), storage_errors (disk/volume/database objects), crash_errors (panics, "
         "stack traces), clean",
         lambda ns, s: f'get_logs("{ns}", "{s}")',
-        label_log_signature, eps=0.25),
+        label_log_signature, eps=0.25, miss=0.40),
 )}
 
 

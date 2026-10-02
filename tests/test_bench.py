@@ -240,11 +240,21 @@ def test_fault_type_is_discriminated_on_same_service():
                             {**common, "log_signature:geo": "config_errors"}),
             hg.no_fault_hypothesis(probes, prior=0.05)]
     inv = Investigation(hyps, probes)
-    first = inv.next_probe()
-    # pod_health only separates the faults from "no fault"; log_signature separates the two faults
-    assert inv.eig("log_signature:geo") > inv.eig("pod_health:geo")
-    assert first == "log_signature:geo"
-    inv.observe(first, label_log_signature(LOG_SAMPLES["auth_errors"], "geo"))
+    # With a fair no-fault share, the first move separates fault from no-fault...
+    assert inv.next_probe() == "pod_health:geo"
+    inv.observe("pod_health:geo", "unhealthy")
+    # ...then it keeps going until it reads the logs, the probe that separates the two fault types
+    # (a cheaper event probe may come first; it also bears on no-fault).
+    seen = []
+    for _ in range(6):
+        k = inv.next_probe()
+        assert k is not None, f"stopped before reading logs: {seen}"
+        seen.append(k)
+        if k == "log_signature:geo":
+            inv.observe(k, label_log_signature(LOG_SAMPLES["auth_errors"], "geo"))
+            break
+        inv.observe(k, {"event_reason:geo": "crash_backoff"}.get(k, probes[k].outcomes[-1]))
+    assert "log_signature:geo" in seen
     assert inv.leader().fault_type == "Authentication Issue"
 
 
@@ -292,7 +302,7 @@ def test_seen_crash_rules_out_no_fault_and_one_log_cannot_flip_it():
     agent = VoIAgent("voi", generate=gen)
     agent.init_context(PROBLEM)
     agent.step(""); agent.step(SVC_OUT); agent.step(PODS_OUT)
-    assert agent.inv.posteriors[hg.NO_FAULT_ID] < 0.05      # geo CrashLoopBackOff already seen
+    assert agent.inv.posteriors[hg.NO_FAULT_ID] < 0.15      # one crashed-pod reading lowers it, without certainty
     agent.inv.observe("log_signature:geo", "clean")
     assert agent.inv.posteriors[hg.NO_FAULT_ID] < 0.5
     assert agent.inv.leader().service == "geo"
@@ -371,8 +381,12 @@ def test_agent_uses_llm_reading_with_its_own_noise_and_keeps_regex_label():
     agent = VoIAgent("voi", generate=gen, log_reader="llm", read_log=fake_read)
     agent.init_context(PROBLEM)
     agent.step(""); agent.step(SVC_OUT)
-    first = agent.step(PODS_OUT)
-    assert "get_logs" in first                       # VoI asks for the discriminating log probe
+    action = agent.step(PODS_OUT)
+    for _ in range(6):                               # VoI reaches the discriminating log probe
+        if "get_logs" in action:
+            break
+        action = agent.step(fake_env(action.strip("`\n ")))
+    assert "get_logs" in action
     agent.step("INF Read database URL: mongodb-geo:27777")
     step = [s for s in agent.inv.steps if s.probe == "log_signature:geo"][0]
     assert step.outcome == "config_errors" and step.eps == sensors.LLM_READ_EPS
@@ -449,7 +463,7 @@ def test_voi_rule_chooses_argmax_and_stops_at_zero():
                             {"log_signature:geo": "auth_errors"}),
             BenchHypothesis("H2", "geo", "Misconfiguration", "Application", "", 0.5,
                             {"log_signature:geo": "config_errors"})]
-    inv = Investigation(hyps, probes, lam=0.05)
+    inv = Investigation(hyps, probes)
     k = inv.next_probe()
     assert k == max(probes, key=inv.voi) and inv.voi(k) > 0
     inv.observe(k, "auth_errors")
@@ -531,3 +545,40 @@ def test_detection_success_is_read_from_detection_accuracy():
     assert analyze.success({"aiopslab_results": {"Detection Accuracy": "Correct", "TTD": 51}})
     assert not analyze.success({"aiopslab_results": {"Detection Accuracy": "Incorrect"}})
     assert analyze.success({"aiopslab_results": {"success": True}})
+
+
+# --------------------------------------------------------------------------- #
+# Calibration fixes from the pilot
+# --------------------------------------------------------------------------- #
+def test_initial_posteriors_keep_no_fault_viable():
+    from ic.bench.decide import initial_posteriors
+    probes = instances(["a", "b"])
+    hyps = [BenchHypothesis(f"H{i}", s, "x", "y", "", p, {}) for i, (s, p) in
+            enumerate([("a", .8), ("b", .7), ("a", .6), ("b", .5), ("a", .5), ("b", .5)], 1)]
+    post = initial_posteriors(hyps + [hg.no_fault_hypothesis(probes)])
+    assert abs(sum(post.values()) - 1) < 1e-9
+    assert abs(post[hg.NO_FAULT_ID] - 0.25) < 1e-9          # was 2.7% with raw LLM confidences
+    assert max(v for k, v in post.items() if k != hg.NO_FAULT_ID) < 0.25   # no single guess dominates
+
+
+def test_startup_errors_do_not_count_as_current_state():
+    startup = ["grpc/lb/consul: connection refused"] * 10
+    steady = ["INF serving request"] * 60
+    assert label_log_signature("\n".join(startup + steady), "frontend") == "clean"
+    assert label_log_signature("\n".join(steady + startup), "frontend") == "connection_errors"
+
+
+def test_prediction_error_softens_every_reading():
+    probes = instances(["geo"])
+    inv = Investigation([BenchHypothesis("H1", "geo", "x", "y", "", .5, {"pod_health:geo": "unhealthy"}),
+                         hg.no_fault_hypothesis(probes)], probes)
+    assert abs(inv._eps(probes["pod_health:geo"]) - (0.05 + 0.95 * 0.10)) < 1e-9
+    assert abs(inv._eps(probes["log_signature:geo"], 0.15) - (0.15 + 0.85 * 0.10)) < 1e-9
+
+
+def test_silent_log_is_weak_evidence_present_symptom_is_strong():
+    from ic.bench.decide import likelihood
+    out = ("auth_errors", "config_errors", "connection_errors", "storage_errors", "crash_errors", "clean")
+    assert likelihood("config_errors", "clean", out, 0.3, miss=0.4) == 0.4          # symptom missing: plausible
+    assert abs(likelihood("config_errors", "auth_errors", out, 0.3, miss=0.4) - 0.06) < 1e-9   # wrong symptom: unlikely
+    assert likelihood("clean", "config_errors", out, 0.3, miss=0.4) == 0.3 / 5     # no-fault seeing an error: unlikely

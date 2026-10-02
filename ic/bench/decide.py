@@ -14,7 +14,7 @@ formula, applied to every unrun probe a:
 
 EIG is in nats (ic/live/beliefs.py); cost is the template's relative cost;
 risk is 0 for read-only probes (it matters for interventions — Gap 2). λ is
-the price of one unit of probe cost in nats: the single knob the paper sweeps.
+the price of one unit of probe cost in nats (default 0.02, lowered from 0.05 after the pilot stopped early 50% of the time): the single knob the paper sweeps.
 A probe budget is a safety cap, not part of the decision rule.
 
 Selection policies — the experiment's conditions C, D and E:
@@ -35,6 +35,47 @@ from ..live import beliefs
 from .probes import ProbeInstance
 
 POLICIES = ("voi", "random", "exhaustive")
+
+# Calibration defaults, set after the qwen3:8b pilot (overconfident: Brier 0.35, 98%
+# confidence on wrong answers; a no-fault incident was flagged as faulty):
+NO_FAULT_PRIOR = 0.25   # fixed starting share of the no-fault hypothesis
+PRIOR_TEMPER = 0.5      # LLM confidences blended halfway toward uniform
+PREDICTION_EPS = 0.10   # chance the LLM's predicted probe outcome is itself wrong
+
+
+def likelihood(prediction: Optional[str], outcome: str, outcomes: tuple[str, ...],
+               eps: float, miss: Optional[float] = None) -> float:
+    """P(outcome | hypothesis). Same as live mode's model, plus one asymmetry from
+    classical diagnosis: a predicted symptom that does not show up (the reading is
+    the healthy label) has probability `miss`, not ε/(k−1). Faults are often silent
+    in logs; absence of a symptom is weak evidence, presence is strong."""
+    k = len(outcomes)
+    if prediction is None:
+        return 1.0 / k
+    if prediction == outcome:
+        return 1.0 - eps
+    healthy = outcomes[-1]
+    if miss is not None and outcome == healthy and prediction != healthy:
+        return miss
+    return eps / (k - 1)
+
+
+def initial_posteriors(hypotheses: list[BenchHypothesis], no_fault_prior: float = NO_FAULT_PRIOR,
+                       prior_temper: float = PRIOR_TEMPER) -> dict[str, float]:
+    """No-fault gets a fixed share; fault hypotheses split the rest by LLM confidence
+    tempered toward uniform. Raw LLM confidences (six causes at 0.5–0.8 against 0.1
+    for no-fault) started no-fault at 2.7% in the pilot."""
+    faults = [h for h in hypotheses if h.service is not None]
+    nofault = [h for h in hypotheses if h.service is None]
+    if not faults:
+        return {h.id: 1.0 / len(hypotheses) for h in hypotheses}
+    total = sum(max(h.prior, 1e-6) for h in faults)
+    mass = 1.0 - (no_fault_prior if nofault else 0.0)
+    post = {h.id: mass * ((1 - prior_temper) * max(h.prior, 1e-6) / total + prior_temper / len(faults))
+            for h in faults}
+    for h in nofault:
+        post[h.id] = no_fault_prior / len(nofault)
+    return post
 
 
 @dataclass
@@ -62,9 +103,11 @@ class Step:
 
 class Investigation:
     def __init__(self, hypotheses: list[BenchHypothesis], probes: dict[str, ProbeInstance], *,
-                 policy: str = "voi", lam: float = 0.05, mu: float = 1.0,
+                 policy: str = "voi", lam: float = 0.02, mu: float = 1.0,
                  stop_confidence: Optional[float] = None,
-                 max_probes: int = 25, eps: Optional[float] = None, seed: int = 0):
+                 max_probes: int = 25, eps: Optional[float] = None, seed: int = 0,
+                 no_fault_prior: float = NO_FAULT_PRIOR, prior_temper: float = PRIOR_TEMPER,
+                 prediction_eps: float = PREDICTION_EPS):
         if policy not in POLICIES:
             raise ValueError(f"unknown policy {policy!r}")
         self.hyps = {h.id: h for h in hypotheses}
@@ -76,8 +119,8 @@ class Investigation:
         self.max_probes = max_probes
         self.eps = eps
         self.rng = random.Random(seed)
-        total = sum(max(h.prior, 1e-6) for h in hypotheses)
-        self.posteriors = {h.id: max(h.prior, 1e-6) / total for h in hypotheses}
+        self.prediction_eps = prediction_eps
+        self.posteriors = initial_posteriors(hypotheses, no_fault_prior, prior_temper)
         self.steps: list[Step] = []
         self.stop_reason: Optional[str] = None
 
@@ -99,11 +142,29 @@ class Investigation:
 
     def eig(self, key: str) -> float:
         probe = self.probes[key]
-        return beliefs.expected_information_gain(
-            self.posteriors, self._predictions(key), probe.outcomes, self._eps(probe))
+        preds, eps, miss = self._predictions(key), self._eps(probe), probe.template.miss
+        prior_h = beliefs.entropy(self.posteriors)
+        expected = 0.0
+        for y in probe.outcomes:
+            joint = {h: p * likelihood(preds[h], y, probe.outcomes, eps, miss) for h, p in self.posteriors.items()}
+            p_y = sum(joint.values())
+            if p_y > 0:
+                expected += p_y * beliefs.entropy({h: v / p_y for h, v in joint.items()})
+        return max(0.0, prior_h - expected)
 
-    def _eps(self, probe: ProbeInstance) -> float:
-        return probe.template.eps if self.eps is None else self.eps
+    def _update(self, key: str, outcome: str, eps: float) -> dict[str, float]:
+        probe = self.probes[key]
+        preds = self._predictions(key)
+        raw = {h: p * likelihood(preds[h], outcome, probe.outcomes, eps, probe.template.miss)
+               for h, p in self.posteriors.items()}
+        z = sum(raw.values())
+        return {h: v / z for h, v in raw.items()} if z > 0 else dict(self.posteriors)
+
+    def _eps(self, probe: ProbeInstance, sensor_eps: Optional[float] = None) -> float:
+        """Total chance a reading contradicts a TRUE hypothesis: the probe's own
+        error, or else the LLM's prediction of it being wrong."""
+        e = sensor_eps if sensor_eps is not None else (probe.template.eps if self.eps is None else self.eps)
+        return e + (1 - e) * self.prediction_eps
 
     def _unrun(self) -> list[str]:
         done = {s.probe for s in self.steps}
@@ -144,9 +205,8 @@ class Investigation:
         if outcome not in probe.outcomes:
             raise ValueError(f"{key}: outcome {outcome!r} not in {probe.outcomes}")
         eig = self.eig(key)
-        e = eps if eps is not None else self._eps(probe)
-        self.posteriors = beliefs.update(
-            self.posteriors, self._predictions(key), outcome, probe.outcomes, e)
+        e = self._eps(probe, eps)
+        self.posteriors = self._update(key, outcome, e)
         self.steps.append(Step(key, outcome, eig, dict(self.posteriors), free, raw[:600], eps, sensor))
 
     def paid_steps(self) -> int:

@@ -46,7 +46,7 @@ def _block(call: str) -> str:
 
 
 class VoIAgent:
-    def __init__(self, policy: str = "voi", *, lam: float = 0.05,
+    def __init__(self, policy: str = "voi", *, lam: float = 0.02,
                  stop_confidence: Optional[float] = None, max_probes: int = 25, seed: int = 0,
                  max_regenerations: int = 1, generate=hyp_gen.generate,
                  log_reader: Optional[str] = None, read_log=None):
@@ -204,7 +204,8 @@ class VoIAgent:
             "submission": self._submission(),
             "leader_claim": lead.claim,
             "hypotheses": {h.id: {"service": h.service, "fault_type": h.fault_type,
-                                  "prior": h.prior} for h in self.inv.hyps.values()},
+                                  "system_level": h.system_level, "prior": h.prior,
+                                  "predictions": h.predictions} for h in self.inv.hyps.values()},
             "regenerations": self.regenerations,
             "log_reader": self.log_reader,
             "generation_meta": self.gen_meta,
