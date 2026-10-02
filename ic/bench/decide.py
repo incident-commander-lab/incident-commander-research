@@ -4,14 +4,26 @@ The LLM proposes hypotheses (ic/bench/hypotheses.py). This module decides,
 using the same Bayesian update and expected-information-gain code as live mode
 (ic/live/beliefs.py), unchanged.
 
-Selection policies — these are the experiment's conditions C, D and E:
-  * "voi"        argmax EIG ÷ cost                         (condition C)
-  * "random"     uniform over unrun probes                 (condition D)
-  * "exhaustive" every probe in a fixed order              (condition E)
+One rule for both choosing and stopping — the project's value-of-information
+formula, applied to every unrun probe a:
 
-Stopping rule (C and D): stop when the leading hypothesis's posterior reaches
-`stop_confidence`, when no unrun probe has EIG ≥ `min_eig`, or when the probe
-budget is spent. Exhaustive ignores the first two and runs everything.
+    VoI(a) = EIG(a) − λ·cost(a) − μ·risk(a)
+
+  * choose:  argmax_a VoI(a)
+  * stop:    max_a VoI(a) ≤ 0   ("no probe is worth what it costs")
+
+EIG is in nats (ic/live/beliefs.py); cost is the template's relative cost;
+risk is 0 for read-only probes (it matters for interventions — Gap 2). λ is
+the price of one unit of probe cost in nats: the single knob the paper sweeps.
+A probe budget is a safety cap, not part of the decision rule.
+
+Selection policies — the experiment's conditions C, D and E:
+  * "voi"        argmax VoI, stop when max VoI ≤ 0                (condition C)
+  * "random"     uniform among probes with VoI > 0, same stop rule (condition D)
+  * "exhaustive" every probe in a fixed order, no stopping rule    (condition E)
+
+`stop_confidence` (off by default) adds a posterior threshold for sensitivity
+analyses only.
 """
 from __future__ import annotations
 
@@ -40,7 +52,7 @@ class BenchHypothesis:
 class Step:
     probe: str
     outcome: str
-    eig: float
+    eig: float           # expected information gain at the moment it was chosen
     posteriors: dict[str, float]
     free: bool = False   # read from discovery output, not a probe the agent paid for
     raw: str = ""        # snippet of the raw reading, for error analysis
@@ -50,15 +62,17 @@ class Step:
 
 class Investigation:
     def __init__(self, hypotheses: list[BenchHypothesis], probes: dict[str, ProbeInstance], *,
-                 policy: str = "voi", stop_confidence: float = 0.9, min_eig: float = 0.01,
+                 policy: str = "voi", lam: float = 0.05, mu: float = 1.0,
+                 stop_confidence: Optional[float] = None,
                  max_probes: int = 25, eps: Optional[float] = None, seed: int = 0):
         if policy not in POLICIES:
             raise ValueError(f"unknown policy {policy!r}")
         self.hyps = {h.id: h for h in hypotheses}
         self.probes = probes
         self.policy = policy
+        self.lam = lam
+        self.mu = mu
         self.stop_confidence = stop_confidence
-        self.min_eig = min_eig
         self.max_probes = max_probes
         self.eps = eps
         self.rng = random.Random(seed)
@@ -107,17 +121,22 @@ class Investigation:
             return None
         if self.policy == "exhaustive":
             return candidates[0]
-        if max(self.posteriors.values()) >= self.stop_confidence:
+        if self.stop_confidence is not None and max(self.posteriors.values()) >= self.stop_confidence:
             self.stop_reason = "confident"
             return None
-        scored = {k: self.eig(k) for k in candidates}
-        informative = [k for k, v in scored.items() if v >= self.min_eig]
-        if not informative:
-            self.stop_reason = "no_discriminating_probe"
+        scored = {k: self.voi(k) for k in candidates}
+        worth_it = [k for k, v in scored.items() if v > 0]
+        if not worth_it:
+            self.stop_reason = "no_probe_worth_its_cost"
             return None
         if self.policy == "random":
-            return self.rng.choice(informative)
-        return max(informative, key=lambda k: scored[k] / self.probes[k].cost)
+            return self.rng.choice(worth_it)
+        return max(worth_it, key=scored.get)
+
+    def voi(self, key: str) -> float:
+        """VoI(a) = EIG(a) − λ·cost(a) − μ·risk(a), in nats."""
+        p = self.probes[key]
+        return self.eig(key) - self.lam * p.cost - self.mu * p.template.risk
 
     def observe(self, key: str, outcome: str, *, free: bool = False, raw: str = "",
                 eps: Optional[float] = None, sensor: Optional[dict] = None) -> None:
@@ -158,7 +177,9 @@ class Investigation:
             "free_observations": len(self.steps) - self.paid_steps(),
             "probe_cost": sum(self.probes[s.probe].cost for s in self.steps if not s.free),
             "stop_reason": self.stop_reason,
+            "lambda": self.lam,
             "leader": self.leader().id,
+            "final_confidence": max(self.posteriors.values()),
             "posteriors": self.posteriors,
             "trace": [s.__dict__ for s in self.steps],
         }

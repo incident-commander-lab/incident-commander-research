@@ -72,6 +72,7 @@ class ProbeTemplate:
     call: Callable[[str, str], str]
     label: Callable[[str, str], str]
     eps: float = 0.05  # P(label contradicts the truth): low for kubectl state, high for log regexes
+    risk: float = 0.0  # every benchmark probe is a read; interventions (Gap 2) set this
 
 
 @dataclass(frozen=True)

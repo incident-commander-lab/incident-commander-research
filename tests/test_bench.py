@@ -107,7 +107,7 @@ def test_task_type_and_namespace():
 def test_voi_localizes_against_wrong_prior():
     agent = run_agent("voi")
     assert agent.result["submission"] == 'submit(["geo"])'
-    assert agent.result["stop_reason"] == "confident"
+    assert agent.result["stop_reason"] == "no_probe_worth_its_cost"
 
 
 def test_voi_uses_fewer_probes_than_exhaustive():
@@ -121,7 +121,7 @@ def test_voi_uses_fewer_probes_than_exhaustive():
 
 def test_random_policy_still_stops():
     agent = run_agent("random")
-    assert agent.result["stop_reason"] in ("confident", "no_discriminating_probe")
+    assert agent.result["stop_reason"] == "no_probe_worth_its_cost"
 
 
 def test_surprise_detects_contradicted_list():
@@ -437,3 +437,35 @@ def test_log_reader_skips_logs_the_regex_already_labels():
     agent.pending = "log_signature:geo"
     agent._observe_pending("INF Initializing DB connection...")
     assert reads == ["geo"]                           # regex said clean: LLM reads it
+
+
+# --------------------------------------------------------------------------- #
+# The single VoI rule: choose argmax VoI, stop when max VoI <= 0
+# --------------------------------------------------------------------------- #
+def test_voi_rule_chooses_argmax_and_stops_at_zero():
+    probes = instances(["geo"])
+    hyps = [BenchHypothesis("H1", "geo", "Authentication Issue", "Application", "", 0.5,
+                            {"log_signature:geo": "auth_errors"}),
+            BenchHypothesis("H2", "geo", "Misconfiguration", "Application", "", 0.5,
+                            {"log_signature:geo": "config_errors"})]
+    inv = Investigation(hyps, probes, lam=0.05)
+    k = inv.next_probe()
+    assert k == max(probes, key=inv.voi) and inv.voi(k) > 0
+    inv.observe(k, "auth_errors")
+    assert inv.next_probe() is None and inv.stop_reason == "no_probe_worth_its_cost"
+    assert all(inv.voi(x) <= 0 for x in inv._unrun())
+
+
+def test_higher_lambda_never_runs_more_probes():
+    counts = []
+    for lam in (0.0, 0.05, 0.2, 1.0):
+        agent = VoIAgent("voi", generate=fake_generate, lam=lam, max_probes=40)
+        agent.init_context(PROBLEM)
+        state = ""
+        for _ in range(60):
+            call = agent.step(state).strip("`\n ")
+            if call.startswith("submit"):
+                break
+            state = SVC_OUT if "get svc" in call else PODS_OUT if call.endswith(f'get pods -n {NS}")') else fake_env(call)
+        counts.append(agent.result["probes_run"])
+    assert counts == sorted(counts, reverse=True), counts

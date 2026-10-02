@@ -46,13 +46,13 @@ def _block(call: str) -> str:
 
 
 class VoIAgent:
-    def __init__(self, policy: str = "voi", *, stop_confidence: float = 0.9,
-                 min_eig: float = 0.01, max_probes: int = 25, seed: int = 0,
+    def __init__(self, policy: str = "voi", *, lam: float = 0.05,
+                 stop_confidence: Optional[float] = None, max_probes: int = 25, seed: int = 0,
                  max_regenerations: int = 1, generate=hyp_gen.generate,
                  log_reader: Optional[str] = None, read_log=None):
         self.policy = policy
-        self.kw = dict(policy=policy, stop_confidence=stop_confidence,
-                       min_eig=min_eig, max_probes=max_probes, seed=seed)
+        self.kw = dict(policy=policy, lam=lam, stop_confidence=stop_confidence,
+                       max_probes=max_probes, seed=seed)
         self.max_regenerations = max_regenerations
         self._generate = generate  # injectable for offline tests
         # "llm": the LLM labels log_signature readings (grounded, quote-checked);
