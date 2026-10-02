@@ -10,6 +10,7 @@ from ic import llm
 from ic.bench import hypotheses as hg
 from ic.bench.agent import VoIAgent, task_type
 from ic.bench.decide import BenchHypothesis, Investigation
+from ic.bench.probes import TEMPLATES
 from ic.bench.probes import (instances, label_deployment, label_endpoints,
                              label_event_reason, label_log_signature, label_pod_health,
                              parse_services)
@@ -116,7 +117,7 @@ def test_voi_uses_fewer_probes_than_exhaustive():
     assert voi.result["probes_run"] < exhaustive.result["probes_run"]
     # pod_health for every service is read for free from the discovery pod listing
     assert exhaustive.result["free_observations"] == len(SERVICES)
-    assert exhaustive.result["probes_run"] == len(SERVICES) * 5 - len(SERVICES)
+    assert exhaustive.result["probes_run"] == len(SERVICES) * len(TEMPLATES) - len(SERVICES)
 
 
 def test_random_policy_still_stops():
@@ -511,3 +512,15 @@ def test_llm_chooser_budget_ignores_free_readings(monkeypatch):
     agent.init_context(PROBLEM)
     agent.step(""); agent.step(SVC_OUT)
     assert "endpoints geo" in agent.step(PODS_OUT)    # 4 free readings must not exhaust a budget of 2
+
+
+def test_service_port_mismatch_check():
+    from ic.bench.probes import label_service_ports, TEMPLATES
+    ok = "T 9090\nuser-service-6c9b8d7f5-abcde   9090\nuser-timeline-service-5d4c3b2a1-fghij   9090"
+    bad = "T 9999\nuser-service-6c9b8d7f5-abcde   9090\nuser-timeline-service-5d4c3b2a1-fghij   9999"
+    assert label_service_ports(ok, "user-service") == "ports_ok"
+    assert label_service_ports(bad, "user-service") == "port_mismatch"      # the other service's 9999 must not count
+    assert label_service_ports("T http\nuser-service-6c9b8d7f5-abcde   9090", "user-service") == "ports_ok"   # named port: no evidence
+    assert label_service_ports("T 9999\nuser-service-6c9b8d7f5-abcde   <none>", "user-service") == "ports_ok"  # no declared ports: no evidence
+    call = TEMPLATES["service_ports"].call("test-social-network", "user-service")
+    assert call.startswith('exec_shell("') and call.endswith('")') and call.count('"') == 2   # parses as one string arg

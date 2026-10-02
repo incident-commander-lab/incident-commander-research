@@ -185,6 +185,28 @@ def label_event_reason(output: str, svc: str) -> str:
     return "none"
 
 
+def label_service_ports(output: str, svc: str) -> str:
+    """Service targetPort vs the containerPorts its pods declare. Output shape:
+        T <targetPort,...>              (first line, from `kubectl get svc`)
+        <pod-name> <containerPort,...>  (one line per pod)
+    A numeric targetPort that no owned pod declares is a mismatch: traffic is sent
+    to a port nothing listens on, while endpoints still look healthy. Named target
+    ports, or pods that declare no ports, give no evidence (ports_ok)."""
+    targets: set[str] = set()
+    pod_ports: set[str] = set()
+    for line in output.splitlines():
+        cols = line.split()
+        if not cols:
+            continue
+        if cols[0] == "T":
+            targets = {p for c in cols[1:] for p in c.split(",") if p.isdigit()}
+        elif len(cols) >= 2 and pod_owner(cols[0]) == svc:
+            pod_ports |= {p for p in cols[1].split(",") if p.isdigit()}
+    if targets and pod_ports and not targets & pod_ports:
+        return "port_mismatch"
+    return "ports_ok"
+
+
 def label_deployment(output: str, svc: str) -> str:
     """`kubectl get deploy <svc>`: READY a/b with a < b (incl. 0/0 scaled down)."""
     rows = _lines_for(output, svc)
@@ -214,6 +236,16 @@ TEMPLATES: dict[str, ProbeTemplate] = {t.name: t for t in (
         "The Kubernetes Service routes to at least one ready pod",
         lambda ns, s: f'exec_shell("kubectl get endpoints {s} -n {ns} --no-headers")',
         label_endpoints),
+    ProbeTemplate(
+        "service_ports", ("port_mismatch", "ports_ok"), 1.0,
+        "The Service's targetPort matches a port the service's pods actually declare "
+        "(a mismatch silently drops traffic while endpoints still look healthy)",
+        lambda ns, s: (f"exec_shell(\"echo T $(kubectl get svc {s} -n {ns} --no-headers "
+                       f"-o custom-columns='T:.spec.ports[*].targetPort'); "
+                       f"kubectl get pods -n {ns} --no-headers "
+                       f"-o custom-columns='N:.metadata.name,P:.spec.containers[*].ports[*].containerPort' "
+                       f"| grep {s}\")"),
+        label_service_ports),
     ProbeTemplate(
         "event_reason", ("scheduling", "storage", "image", "probe_failure", "crash_backoff", "none"), 1.0,
         "Kind of Kubernetes Warning event for the service: scheduling (pod cannot be placed), "
