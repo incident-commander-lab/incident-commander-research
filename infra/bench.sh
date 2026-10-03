@@ -194,6 +194,7 @@ LAST=$(tail -1 ~/results/full_progress.txt 2>/dev/null)
 case "$LAST" in
   *CHUNK_DONE*) echo ">>> NIGHT FINISHED. Next: ~/ic-bench.sh pause  (then the next night when you can)";;
   *STOPPED*)    echo ">>> STOPPED EARLY: $LAST. Run the same night command again; it continues where it left off.";;
+  *PAUSED*)     echo ">>> PAUSED. Run the same night command again to continue.";;
   "")           echo ">>> nothing started yet";;
   *)            echo ">>> RUNNING. Last step: $LAST";;
 esac
@@ -253,10 +254,21 @@ table)
   python3 "$TMP/analyze.py" "$LOCAL_RESULTS/results/full_rq1.jsonl"
   ;;
 pause)
-  pkill -f "ic-bench-tunnel" 2>/dev/null || true; pkill -f "infra/tunnel.sh" 2>/dev/null || true
-  pkill -x caffeinate 2>/dev/null || true; pkill -x ollama 2>/dev/null || true; pkill -f ic-bench-watch 2>/dev/null || true
-  ID=$(instance_id); [ -n "$ID" ] && [ "$ID" != "None" ] && aws_ ec2 stop-instances --instance-ids "$ID" >/dev/null && echo "AWS machine stopping (disk kept, ~\$0.40/day)"
+  pkill -f ic-bench-watch 2>/dev/null || true          # no "stopped early" alert for a deliberate pause
+  ID=$(instance_id)
+  if [ -n "$ID" ] && [ "$ID" != "None" ] && [ "$(state "$ID")" = "running" ]; then
+    say "Stopping the run on AWS and cleaning up (about 1-2 min)"
+    host 300 'pkill -f run_chunk.sh; pkill -f "ic.bench.run_aiopslab"; sleep 3; pkill -f "kubectl port-forward"
+for ns in test-hotel-reservation test-social-network astronomy-shop; do kubectl delete ns $ns --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1; done
+helm uninstall prometheus -n observe >/dev/null 2>&1
+kubectl delete ns observe openebs --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1
+echo "$(date -u "+%F %T") PAUSED by user" >> ~/results/full_progress.txt; echo CLEAN_OK' | grep -q CLEAN_OK && echo "cleaned up: no half-finished run left behind"
+  fi
+  pkill -f "ic-bench-tunnel" 2>/dev/null || true
+  pkill -x caffeinate 2>/dev/null || true; pkill -x ollama 2>/dev/null || true
+  [ -n "$ID" ] && [ "$ID" != "None" ] && aws_ ec2 stop-instances --instance-ids "$ID" >/dev/null && echo "AWS machine stopping (disk kept, ~\$0.40/day)"
   echo "laptop: tunnel, model server and keep-awake stopped"
+  say "PAUSED. To continue: run the same night command again (finished runs are skipped)."
   ;;
 down)
   "$0" fetch || true
