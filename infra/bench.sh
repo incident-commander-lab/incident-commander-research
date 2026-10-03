@@ -198,16 +198,44 @@ case "$LAST" in
   *)            echo ">>> RUNNING. Last step: $LAST";;
 esac
 python3 - <<"PY"
-import json, collections, os
-p = os.path.expanduser("~/results/full_rq1.jsonl")
-if not os.path.exists(p): print("no results yet"); raise SystemExit
+import json, collections, os, re, datetime
+NIGHTS = {("qwen3:8b", frozenset({"voi", "random", "exhaustive"})): 1,
+          ("qwen3:8b", frozenset({"react", "llm_choose"})): 2,
+          ("qwen3:14b", frozenset({"react", "voi"})): 3}
+PER_POLICY = 75
+prog = os.path.expanduser("~/results/full_progress.txt")
+out = os.path.expanduser("~/results/full_rq1.jsonl")
+lines = open(prog).read().splitlines() if os.path.exists(prog) else []
+starts = [l for l in lines if " START " in l]
+if not starts:
+    raise SystemExit
+model, pol = starts[-1].split()[3:5]
+night = next(((n, ps) for (m, ps), n in NIGHTS.items() if m == model and pol in ps), (None, frozenset({pol})))
+n, policies = night
+rows = [json.loads(l) for l in open(out)] if os.path.exists(out) else []
+done = sum(1 for r in rows if r.get("model") == model and r.get("policy") in policies and not r.get("llm_error"))
+total = PER_POLICY * len(policies)
+ts = lambda l: datetime.datetime.strptime(" ".join(l.split()[:2]), "%Y-%m-%d %H:%M:%S")
+durs, pending = [], {}
+for l in lines:
+    f = l.split()
+    if len(f) >= 6 and f[2] in ("START", "END"):
+        key = tuple(f[3:6])
+        if f[2] == "START": pending[key] = ts(l)
+        elif key in pending: durs.append((ts(l) - pending.pop(key)).total_seconds())
+avg = sum(durs[-20:]) / len(durs[-20:]) if durs else 280
+left = max(total - done, 0)
+eta = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) + datetime.timedelta(seconds=left * avg)
+bar = "#" * int(30 * done / total) + "-" * (30 - int(30 * done / total))
+print(f"\nNight {n or chr(63)}: [{bar}] {done}/{total} runs ({100*done/total:.0f}%)")
+print(f"about {left*avg/3600:.1f} h left, finishing around {eta:%H:%M} UTC ({(eta+datetime.timedelta(hours=3)):%H:%M} Cairo)  [avg {avg/60:.1f} min/run]")
 c = collections.Counter(); ok = collections.Counter()
-for l in open(p):
-    r = json.loads(l); k = (r.get("model"), r.get("policy")); c[k] += 1
+for r in rows:
+    k = (r.get("model"), r.get("policy")); c[k] += 1
     a = r.get("aiopslab_results") or {}
     ok[k] += bool(a.get("success")) or a.get("Detection Accuracy") == "Correct"
-print("\nfinished runs (of 75 each):")
-for k in sorted(c, key=str): print(f"  {k[0]:10} {k[1]:11} {c[k]:3}   correct {ok[k]}")
+print("\nfinished so far:")
+for k in sorted(c, key=str): print(f"  {k[0]:10} {k[1]:11} {c[k]:3}/75   correct {ok[k]}")
 PY' || true
   true
   ;;
