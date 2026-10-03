@@ -167,7 +167,21 @@ night)
   ensure_running; sync_code; start_laptop_side "$MODEL"
   say "Starting night $2: $MODEL — $POLICIES"
   host 30 "nohup ~/run_chunk.sh $MODEL $POLICIES > ~/results/chunk_driver.log 2>&1 & sleep 3; tail -1 ~/results/full_progress.txt"
-  say "Running. Leave the laptop plugged in, online, lid open. Check any time:  ~/ic-bench.sh status"
+  pkill -f "ic-bench-watch" 2>/dev/null || true
+  ( nohup bash -c 'exec -a ic-bench-watch bash "$0" _watch "$1"' "$0" "$2" > "$HOME/.ic-bench-watch.log" 2>&1 & )
+  say "Running. You will get a Mac notification (with a sound) when night $2 finishes or if it stops early."
+  echo "Leave the laptop plugged in, online, lid open. Check any time:  ~/ic-bench.sh status"
+  ;;
+_watch)
+  # background: every 10 min, read the host's progress file; notify once on finish or stop
+  while true; do
+    sleep 600
+    L=$(host 60 'tail -1 ~/results/full_progress.txt 2>/dev/null' | tail -1)
+    case "$L" in
+      *CHUNK_DONE*) osascript -e "display notification \"Night ${2:-} finished. Run: ~/ic-bench.sh pause\" with title \"Incident Commander benchmark\" sound name \"Glass\""; exit 0;;
+      *STOPPED*)    osascript -e "display notification \"Night ${2:-} stopped early (tunnel down). Run the same night command again.\" with title \"Incident Commander benchmark\" sound name \"Basso\""; exit 0;;
+    esac
+  done
   ;;
 status)
   ID=$(instance_id); echo "AWS machine: ${ID:-none} ($( [ -n "$ID" ] && state "$ID" || echo -))"
@@ -175,7 +189,14 @@ status)
   curl -sf -m 3 127.0.0.1:11434/api/version >/dev/null && echo "model server: up" || echo "model server: down"
   pgrep -x caffeinate >/dev/null && echo "keep-awake: on" || echo "keep-awake: off"
   [ -n "$ID" ] && [ "$(state "$ID")" = "running" ] && host 60 '
-echo; tail -3 ~/results/full_progress.txt 2>/dev/null
+echo
+LAST=$(tail -1 ~/results/full_progress.txt 2>/dev/null)
+case "$LAST" in
+  *CHUNK_DONE*) echo ">>> NIGHT FINISHED. Next: ~/ic-bench.sh pause  (then the next night when you can)";;
+  *STOPPED*)    echo ">>> STOPPED EARLY: $LAST. Run the same night command again; it continues where it left off.";;
+  "")           echo ">>> nothing started yet";;
+  *)            echo ">>> RUNNING. Last step: $LAST";;
+esac
 python3 - <<"PY"
 import json, collections, os
 p = os.path.expanduser("~/results/full_rq1.jsonl")
@@ -196,7 +217,8 @@ fetch)
   mkdir -p "$LOCAL_RESULTS"
   host 300 'cd ~ && echo BEGIN_B64 && tar czf - results 2>/dev/null | base64 -w0 && echo && echo END_B64' \
     | sed -n '/BEGIN_B64/,/END_B64/p' | sed '1d;$d' | tr -d '\r\n' | base64 -d | tar xzf - -C "$LOCAL_RESULTS"
-  wc -l "$LOCAL_RESULTS/results/full_rq1.jsonl"
+  N=$(wc -l < "$LOCAL_RESULTS/results/full_rq1.jsonl" | tr -d ' ')
+  echo "DONE: $N runs copied to $LOCAL_RESULTS"
   ;;
 table)
   git -C "$REPO" show "$BRANCH:ic/bench/analyze.py" > "$TMP/analyze.py"
@@ -204,7 +226,7 @@ table)
   ;;
 pause)
   pkill -f "ic-bench-tunnel" 2>/dev/null || true; pkill -f "infra/tunnel.sh" 2>/dev/null || true
-  pkill -x caffeinate 2>/dev/null || true; pkill -x ollama 2>/dev/null || true
+  pkill -x caffeinate 2>/dev/null || true; pkill -x ollama 2>/dev/null || true; pkill -f ic-bench-watch 2>/dev/null || true
   ID=$(instance_id); [ -n "$ID" ] && [ "$ID" != "None" ] && aws_ ec2 stop-instances --instance-ids "$ID" >/dev/null && echo "AWS machine stopping (disk kept, ~\$0.40/day)"
   echo "laptop: tunnel, model server and keep-awake stopped"
   ;;
