@@ -97,8 +97,15 @@ PY
 }
 for pol in $POLICIES; do for p in $PROBLEMS; do
   done_already "$p" "$pol" && continue
-  if ! curl -sf -m 5 http://127.0.0.1:11434/api/version >/dev/null; then
-    echo "$(date -u '+%F %T') STOPPED: tunnel to the laptop is down" >> "$PROG"; exit 1; fi
+  # the model must be reachable; ride out slow answers and short Wi-Fi drops (retry up to 30 min)
+  tries=0
+  until curl -sf -m 20 http://127.0.0.1:11434/api/version >/dev/null; do
+    tries=$((tries+1))
+    [ $tries -eq 1 ] && echo "$(date -u '+%F %T') WAITING: model not reachable, retrying" >> "$PROG"
+    if [ $tries -ge 60 ]; then
+      echo "$(date -u '+%F %T') STOPPED: tunnel to the laptop is down (30 min)" >> "$PROG"; exit 1; fi
+    sleep 30
+  done
   echo "$(date -u '+%F %T') START $MODEL $pol $p" >> "$PROG"
   timeout 2700 ~/.local/bin/poetry run python -m ic.bench.run_aiopslab --policy "$pol" --problems "$p" \
       --max-steps 30 --out "$OUT" > "$LOGS/${MODEL//:/_}__${pol}__${p}.log" 2>&1
@@ -193,6 +200,7 @@ echo
 LAST=$(tail -1 ~/results/full_progress.txt 2>/dev/null)
 case "$LAST" in
   *CHUNK_DONE*) echo ">>> NIGHT FINISHED. Next: ~/ic-bench.sh pause  (then the next night when you can)";;
+  *WAITING*)    echo ">>> WAITING for the laptop model (retrying for up to 30 min): $LAST";;
   *STOPPED*)    echo ">>> STOPPED EARLY: $LAST. Run the same night command again; it continues where it left off.";;
   *PAUSED*)     echo ">>> PAUSED. Run the same night command again to continue.";;
   "")           echo ">>> nothing started yet";;
