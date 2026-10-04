@@ -97,6 +97,12 @@ for line in open(out):
 sys.exit(1)
 PY
 }
+# start clean: a pause or crash may have left a half-deployed app or monitoring behind
+pkill -f "kubectl port-forward" 2>/dev/null
+for ns in test-hotel-reservation test-social-network astronomy-shop; do kubectl delete ns $ns --ignore-not-found --wait=true --timeout=300s >/dev/null 2>&1; done
+helm uninstall prometheus -n observe >/dev/null 2>&1
+kubectl delete ns observe openebs --ignore-not-found --wait=true --timeout=300s >/dev/null 2>&1
+echo "$(date -u '+%F %T') CHUNK_START $MODEL $POLICIES (cluster cleaned)" >> "$PROG"
 for pol in $POLICIES; do for p in $PROBLEMS; do
   done_already "$p" "$pol" && continue
   # the model must be reachable; ride out slow answers and short Wi-Fi drops (retry up to 30 min)
