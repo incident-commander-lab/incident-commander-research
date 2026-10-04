@@ -84,7 +84,9 @@ cd ~/AIOpsLab
 export PYTHONPATH=~/incident-commander IC_USE_LLM=1 IC_STRICT_PROVIDER=1 IC_PROVIDER=openrouter_models \
        IC_OPENROUTER_MODELS=ollama:$MODEL IC_OLLAMA_BASE_URL=http://127.0.0.1:11434/v1 IC_LLM_TIMEOUT=400
 OUT=~/results/full_rq1.jsonl; LOGS=~/results/full_logs; PROG=~/results/full_progress.txt; mkdir -p "$LOGS"
-PROBLEMS=$(~/.local/bin/poetry run python -c "from aiopslab.orchestrator.problems.registry import ProblemRegistry as R; print(' '.join(i for i in R().get_problem_ids() if 'mitigation' not in i))" 2>/dev/null | tail -1)
+PROBLEMS=$(~/.local/bin/poetry run python -c "from aiopslab.orchestrator.problems.registry import ProblemRegistry as R; r=R(); print(' '.join(i for i in r.get_problem_ids() if 'mitigation' not in i and r.get_problem_deployment(i) == 'k8s'))" 2>/dev/null | tail -1)
+# Docker-deployed problems (flower) are out of scope: the probe catalog is Kubernetes-only, and they hang here.
+echo "$PROBLEMS" | wc -w | tr -d ' ' > ~/results/problem_count.txt
 done_already() { [ -f "$OUT" ] && python3 - "$OUT" "$1" "$2" "$MODEL" <<'PY'
 import json, sys
 out, prob, pol, model = sys.argv[1:]
@@ -211,7 +213,7 @@ import json, collections, os, re, datetime
 NIGHTS = {("qwen3:8b", frozenset({"voi", "random", "exhaustive"})): 1,
           ("qwen3:8b", frozenset({"react", "llm_choose"})): 2,
           ("qwen3:14b", frozenset({"react", "voi"})): 3}
-PER_POLICY = 75
+PER_POLICY = int(open(os.path.expanduser("~/results/problem_count.txt")).read().strip() or 73) if os.path.exists(os.path.expanduser("~/results/problem_count.txt")) else 73
 prog = os.path.expanduser("~/results/full_progress.txt")
 out = os.path.expanduser("~/results/full_rq1.jsonl")
 lines = open(prog).read().splitlines() if os.path.exists(prog) else []
@@ -244,7 +246,7 @@ for r in rows:
     a = r.get("aiopslab_results") or {}
     ok[k] += bool(a.get("success")) or a.get("Detection Accuracy") == "Correct"
 print("\nfinished so far:")
-for k in sorted(c, key=str): print(f"  {k[0]:10} {k[1]:11} {c[k]:3}/75   correct {ok[k]}")
+for k in sorted(c, key=str): print(f"  {k[0]:10} {k[1]:11} {c[k]:3}/{PER_POLICY}   correct {ok[k]}")
 PY' || true
   true
   ;;
