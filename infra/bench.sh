@@ -34,8 +34,10 @@ onhost() {
   local T=$1 F=$2 ID B64 PARAMS
   ID=$(instance_id); B64=$(base64 < "$F" | tr -d '\n')
   PARAMS=$(python3 -c 'import json,sys; print(json.dumps({"command":["bash -c \"echo %s | base64 -d | sudo -iu ubuntu bash\"" % sys.argv[1]]}))' "$B64")
-  aws_ ssm start-session --target "$ID" --document-name AWS-StartNonInteractiveCommand \
-    --parameters "$PARAMS" < <(sleep "$T") 2>&1 | perl -e "alarm $T; print while <STDIN>" \
+  # hard timeout on the aws process itself (a session to a still-booting machine can hang forever)
+  perl -e 'alarm shift; exec @ARGV' "$T" aws --profile "$PROFILE" --region "$REGION" ssm start-session \
+    --target "$ID" --document-name AWS-StartNonInteractiveCommand \
+    --parameters "$PARAMS" < <(sleep "$T") 2>&1 \
     | grep -v -e "^Starting session" -e "^Exiting session" -e '^\s*$' || true
 }
 host() { printf '%s\n' "$2" > "$TMP/s.sh"; onhost "$1" "$TMP/s.sh"; }
