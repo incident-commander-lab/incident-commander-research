@@ -88,6 +88,7 @@ class Episode:
     cost: float = 0.0
     resolved_by: Optional[str] = None           # "agent:<action>" | "human"
     log: list = field(default_factory=list)
+    eps_scale: float = 1.0                      # sensitivity: real check noise vs the nominal noise the agent assumes
     harmful: int = 0                            # actions that did not fix (unnecessary disruption)
     denied: int = 0                             # actions the policy refused
 
@@ -103,7 +104,7 @@ class Episode:
         c = CHECKS[name]
         self._spend(c.seconds)
         right = c.truth[self.cause]
-        if self.rng.random() < c.eps:
+        if self.rng.random() < min(0.9, c.eps * self.eps_scale):
             out = self.rng.choice([o for o in c.outcomes if o != right])
         else:
             out = right

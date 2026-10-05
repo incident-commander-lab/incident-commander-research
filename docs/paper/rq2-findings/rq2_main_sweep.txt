@@ -1,0 +1,22 @@
+impact               policy          cost  time(s)  correct  paired  harmful  esc|fixable  act|unfixable  checks
+----------------------------------------------------------------------------------------------------------------
+low (r=0.25)         ours             292      399      87%     86%      10%           8%            17%    3.08
+low (r=0.25)         ours_myopic      305      413      84%     76%      12%          12%            21%    2.58
+low (r=0.25)         gira             375      416      69%     78%      29%           7%            50%    3.19
+low (r=0.25)         conf70           324      411      78%     67%      17%          13%            24%    2.07
+low (r=0.25)         diag_first       322      468      83%     66%       2%          33%             2%    2.97
+moderate (r=1)       ours             583      388      86%     81%      12%           5%            18%    2.86
+moderate (r=1)       ours_myopic      595      397      86%     80%      11%           9%            18%    3.06
+moderate (r=1)       gira             834      432      25%      0%      75%           2%           100%    2.33
+moderate (r=1)       conf70           632      411      78%     67%      17%          13%            24%    2.07
+moderate (r=1)       diag_first       673      468      83%     66%       2%          33%             2%    2.97
+high (r=4)           ours            1894      400      70%     70%      30%           3%            52%    2.51
+high (r=4)           ours_myopic     1891      395      67%     71%      32%           2%            55%    2.35
+high (r=4)           gira            2290      448      25%      0%      75%           0%           100%    2.00
+high (r=4)           conf70          1866      411      78%     67%      17%          13%            24%    2.07
+high (r=4)           diag_first      2076      468      83%     66%       2%          33%             2%    2.97
+critical (r=16)      ours            6591      391      66%     67%      34%           2%            58%    2.03
+critical (r=16)      ours_myopic     6730      401      66%     61%      34%           2%            58%    2.52
+critical (r=16)      gira            7660      448      25%      0%      75%           0%           100%    2.00
+critical (r=16)      conf70          6799      411      78%     67%      17%          13%            24%    2.07
+critical (r=16)      diag_first      7688      468      83%     66%       2%          33%             2%    2.97
