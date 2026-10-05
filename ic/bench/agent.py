@@ -118,10 +118,37 @@ class VoIAgent:
         hyps, meta = self._generate(self.problem, self.services, self.probes,
                                     self.observations, findings)
         self.gen_meta.append(meta)
+        if not any(h.service for h in hyps) and self.regenerations < self.max_regenerations:
+            # every LLM hypothesis was filtered out (e.g. it named pods or nodes, not services):
+            # ask once more, with the exact service names spelled out
+            self.regenerations += 1
+            obs = {**self.observations, "valid service names (use exactly these)": ", ".join(self.services)}
+            hyps, meta = self._generate(self.problem, self.services, self.probes, obs, findings)
+            self.gen_meta.append({**meta, "retry": "all_hypotheses_filtered"})
         old_steps = self.inv.steps if self.inv else self._discovery_evidence()
+        hyps = hyps + self._safety_net(hyps, old_steps)
         self.inv = Investigation(hyps, self.probes, **self.kw)
         for s in old_steps:  # carry evidence over to the new hypothesis set
             self.inv.observe(s.probe, s.outcome, free=s.free, raw=s.raw, eps=s.eps, sensor=s.sensor)
+
+    def _safety_net(self, hyps: list, steps: list) -> list:
+        """A service whose pod is visibly unhealthy always has at least one fault
+        hypothesis. Without it, a crashed or Pending pod could be 'explained' as no
+        fault when the LLM's hypotheses were filtered out (pilot-full run: a Pending
+        pod on a non-existent node was answered 'no fault' at 100%)."""
+        from .decide import BenchHypothesis
+        covered = {h.service for h in hyps if h.service}
+        extra = []
+        for st in steps:
+            svc = st.probe.split(":", 1)[1]
+            if st.probe.startswith("pod_health:") and st.outcome == "unhealthy" and svc not in covered:
+                extra.append(BenchHypothesis(f"S{len(extra) + 1}", svc, "Operation Error", "Virtualization",
+                                             f"{svc} is faulty (its pod is not healthy)", 0.3,
+                                             {st.probe: "unhealthy"}))
+                covered.add(svc)
+        if extra:
+            self.gen_meta.append({"safety_net_hypotheses": [h.service for h in extra]})
+        return extra
 
     def _discovery_evidence(self) -> list:
         """The pod listing from discovery already answers pod_health for every

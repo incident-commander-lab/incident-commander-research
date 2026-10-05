@@ -582,3 +582,21 @@ def test_silent_log_is_weak_evidence_present_symptom_is_strong():
     assert likelihood("config_errors", "clean", out, 0.3, miss=0.4) == 0.4          # symptom missing: plausible
     assert abs(likelihood("config_errors", "auth_errors", out, 0.3, miss=0.4) - 0.06) < 1e-9   # wrong symptom: unlikely
     assert likelihood("clean", "config_errors", out, 0.3, miss=0.4) == 0.3 / 5     # no-fault seeing an error: unlikely
+
+
+# --------------------------------------------------------------------------- #
+# Full-run fix: all LLM hypotheses filtered out
+# --------------------------------------------------------------------------- #
+def test_filtered_hypotheses_get_one_retry_and_a_safety_net():
+    calls = []
+
+    def gen(problem, services, probes, observations, findings=None):
+        calls.append(dict(observations))
+        return [hg.no_fault_hypothesis(probes)], {"dropped_hypotheses": 3}   # every LLM guess filtered
+    agent = VoIAgent("voi", generate=gen)
+    agent.init_context(PROBLEM)
+    agent.step(""); agent.step(SVC_OUT); agent.step(PODS_OUT)                 # geo is CrashLoopBackOff
+    assert len(calls) == 2 and "valid service names (use exactly these)" in calls[1]
+    services = {h.service for h in agent.inv.hyps.values()}
+    assert "geo" in services                                                  # safety net from the crashed pod
+    assert agent.inv.leader().service == "geo"                                # never 'no fault' over a visible crash
