@@ -6,6 +6,7 @@
 #   ~/ic-bench.sh night 2   qwen3:8b — plain LLM, LLM-chooser          (~13 h)
 #   ~/ic-bench.sh night 3   qwen3:14b — plain LLM, ours                (~14 h, optional)
 #   ~/ic-bench.sh status    progress, any time (also safe while a night runs)
+#   ~/ic-bench.sh redo <text>  forget results whose problem name contains <text>, so the next night re-runs them
 #   ~/ic-bench.sh fetch     copy results to the laptop
 #   ~/ic-bench.sh table     results table (after fetch)
 #   ~/ic-bench.sh pause     stop tunnel/model/keep-awake and stop the AWS machine (disk kept)
@@ -199,6 +200,19 @@ _watch)
       *STOPPED*)    osascript -e "display notification \"Night ${2:-} stopped early (tunnel down). Run the same night command again.\" with title \"Incident Commander benchmark\" sound name \"Basso\""; exit 0;;
     esac
   done
+  ;;
+redo)
+  [ -z "${2:-}" ] && { echo "usage: ~/ic-bench.sh redo <part of a problem name>"; exit 1; }
+  ensure_running
+  host 60 "python3 - <<'PY'
+import json, os
+p = os.path.expanduser('~/results/full_rq1.jsonl')
+rows = [json.loads(l) for l in open(p)]
+keep = [r for r in rows if '$2' not in r.get('problem', '')]
+os.rename(p, p + '.before-redo')
+open(p, 'w').writelines(json.dumps(r) + '\\n' for r in keep)
+print(f'removed {len(rows) - len(keep)} results matching $2; the next night command re-runs them')
+PY"
   ;;
 status)
   ID=$(instance_id); echo "AWS machine: ${ID:-none} ($( [ -n "$ID" ] && state "$ID" || echo -))"
