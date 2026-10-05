@@ -16,10 +16,10 @@
 # after an interruption just continues. Keep the laptop plugged in, online, lid open.
 set -euo pipefail
 
-REPO="/Users/shahy/Desktop/Incident commander"
+REPO="${IC_REPO:-$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)}"   # repo root (override with IC_REPO)
 BRANCH="research/voi-benchmark"
 PROFILE=ic-bench; REGION=us-east-1; STACK=ic-bench
-EMAIL="you@example.com"
+EMAIL="${IC_BUDGET_EMAIL:?set IC_BUDGET_EMAIL to the address that should get AWS budget alerts}"
 KEY="$HOME/.ssh/ic-bench-tunnel"
 LOCAL_RESULTS="$REPO/results/aiopslab_full_rq1"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
