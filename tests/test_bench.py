@@ -600,3 +600,69 @@ def test_filtered_hypotheses_get_one_retry_and_a_safety_net():
     services = {h.service for h in agent.inv.hyps.values()}
     assert "geo" in services                                                  # safety net from the crashed pod
     assert agent.inv.leader().service == "geo"                                # never 'no fault' over a visible crash
+
+
+# --- rule v2 (after the qwen3:14b run) ------------------------------------------------
+from ic.bench.agent import catch_alls
+
+
+def _crash_loop_case(rule_version):
+    """qwen3:14b, pod_failure_hotel_res-detection-1: the pod list shows `user` in
+    CrashLoopBackOff, but a slower model's next checks catch it briefly Running, so
+    its over-specific predictions (degraded, no endpoints) are contradicted."""
+    svcs = ["frontend", "mongodb-user", "user"]
+    probes = instances(svcs)
+    mk = lambda i, svc, ft, preds, p: BenchHypothesis(f"H{i}", svc, ft, "Application", "", p, preds)
+    hyps = [mk(1, "user", "Code Defect", {"pod_health:user": "unhealthy", "deployment_ready:user": "degraded",
+                                          "endpoints:user": "no_endpoints"}, 0.8),
+            mk(2, "mongodb-user", "Dependency Problem", {"pod_health:mongodb-user": "healthy",
+                                                         "log_signature:mongodb-user": "connection_errors"}, 0.6),
+            mk(3, "user", "Authentication Issue", {"pod_health:user": "unhealthy", "deployment_ready:user": "degraded",
+                                                   "endpoints:user": "no_endpoints"}, 0.5),
+            hg.no_fault_hypothesis(probes)]
+    if rule_version >= 2:
+        hyps += catch_alls(svcs, probes)
+    inv = Investigation(hyps, probes, rule_version=rule_version)
+    for svc in ("frontend", "mongodb-user"):
+        inv.observe(f"pod_health:{svc}", "healthy", free=True)
+    inv.observe("pod_health:user", "unhealthy", free=True)
+    inv.observe("deployment_ready:user", "ready")
+    inv.observe("endpoints:user", "has_endpoints")
+    return inv
+
+
+def test_v1_reproduces_no_fault_on_crash_loop():
+    inv = _crash_loop_case(1)
+    assert inv.leader().id == hg.NO_FAULT_ID   # the original failure, kept reproducible
+
+
+def test_v2_catch_all_keeps_a_seen_crash_from_becoming_no_fault():
+    inv = _crash_loop_case(2)
+    assert inv.p_fault() > 0.5
+    m = inv.service_marginals()
+    assert max(m, key=m.get) == "user"   # the answer, even though "no fault" is the single top item
+
+
+def test_v2_abnormal_reading_counts_more_strongly_against_no_fault():
+    """'No fault' is a definition, not an LLM guess: v2 gives it only the probe's own
+    error, so an abnormal reading weighs about three times more against it than in v1.
+    Readings every hypothesis predicts alike stay neutral in both versions."""
+    probes = instances(["a", "b"])
+    h1 = BenchHypothesis("H1", "a", "Code Defect", "Application", "", 0.5, {"log_signature:a": "crash_errors"})
+    after = {}
+    for v in (1, 2):
+        inv = Investigation([h1, hg.no_fault_hypothesis(probes)], probes, rule_version=v)
+        before = inv.posteriors[hg.NO_FAULT_ID]
+        inv.observe("pod_health:b", "healthy", free=True)
+        assert abs(inv.posteriors[hg.NO_FAULT_ID] - before) < 1e-9
+        inv.observe("pod_health:a", "unhealthy", free=True)
+        after[v] = inv.posteriors[hg.NO_FAULT_ID]
+    assert after[2] < after[1] / 2
+
+
+def test_catch_alls_never_count_as_contradicted():
+    inv = _crash_loop_case(2)
+    for h in inv.hyps.values():
+        if not h.catch_all:
+            h.predictions = {k: "something_else" for k in h.predictions}
+    assert inv.surprise()   # every specific cause contradicted → still triggers re-generation

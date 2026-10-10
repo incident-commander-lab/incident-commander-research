@@ -41,6 +41,10 @@ POLICIES = ("voi", "random", "exhaustive")
 NO_FAULT_PRIOR = 0.25   # fixed starting share of the no-fault hypothesis
 PRIOR_TEMPER = 0.5      # LLM confidences blended halfway toward uniform
 PREDICTION_EPS = 0.10   # chance the LLM's predicted probe outcome is itself wrong
+# Rule v2, after the qwen3:14b run (detection fell to 10/32; 22 misses ended at "no fault",
+# 15 of them after seeing an abnormal reading). v1 reproduces the original rule.
+OTHER_PRIOR = 0.10      # fixed share of the catch-all "some other fault in <service>" hypotheses
+RULE_VERSION = 2
 
 
 def likelihood(prediction: Optional[str], outcome: str, outcomes: tuple[str, ...],
@@ -61,18 +65,26 @@ def likelihood(prediction: Optional[str], outcome: str, outcomes: tuple[str, ...
 
 
 def initial_posteriors(hypotheses: list[BenchHypothesis], no_fault_prior: float = NO_FAULT_PRIOR,
-                       prior_temper: float = PRIOR_TEMPER) -> dict[str, float]:
+                       prior_temper: float = PRIOR_TEMPER, other_prior: float = OTHER_PRIOR
+                       ) -> dict[str, float]:
     """No-fault gets a fixed share; fault hypotheses split the rest by LLM confidence
     tempered toward uniform. Raw LLM confidences (six causes at 0.5–0.8 against 0.1
-    for no-fault) started no-fault at 2.7% in the pilot."""
-    faults = [h for h in hypotheses if h.service is not None]
+    for no-fault) started no-fault at 2.7% in the pilot. Catch-all hypotheses, when
+    present, share a fixed `other_prior` evenly."""
+    faults = [h for h in hypotheses if h.service is not None and not h.catch_all]
     nofault = [h for h in hypotheses if h.service is None]
-    if not faults:
+    others = [h for h in hypotheses if h.catch_all]
+    if not faults and not others:
         return {h.id: 1.0 / len(hypotheses) for h in hypotheses}
-    total = sum(max(h.prior, 1e-6) for h in faults)
-    mass = 1.0 - (no_fault_prior if nofault else 0.0)
-    post = {h.id: mass * ((1 - prior_temper) * max(h.prior, 1e-6) / total + prior_temper / len(faults))
-            for h in faults}
+    o = other_prior if others else 0.0
+    mass = 1.0 - (no_fault_prior if nofault else 0.0) - (o if faults else 0.0)
+    post: dict[str, float] = {}
+    if faults:
+        total = sum(max(h.prior, 1e-6) for h in faults)
+        post = {h.id: mass * ((1 - prior_temper) * max(h.prior, 1e-6) / total + prior_temper / len(faults))
+                for h in faults}
+    for h in others:
+        post[h.id] = (o if faults else mass) / len(others)
     for h in nofault:
         post[h.id] = no_fault_prior / len(nofault)
     return post
@@ -87,6 +99,7 @@ class BenchHypothesis:
     claim: str
     prior: float
     predictions: dict[str, str] = field(default_factory=dict)  # probe key → outcome
+    catch_all: bool = False         # "some other fault in `service`": no symptom predictions
 
 
 @dataclass
@@ -107,7 +120,8 @@ class Investigation:
                  stop_confidence: Optional[float] = None,
                  max_probes: int = 25, eps: Optional[float] = None, seed: int = 0,
                  no_fault_prior: float = NO_FAULT_PRIOR, prior_temper: float = PRIOR_TEMPER,
-                 prediction_eps: float = PREDICTION_EPS):
+                 prediction_eps: float = PREDICTION_EPS, other_prior: float = OTHER_PRIOR,
+                 rule_version: int = RULE_VERSION):
         if policy not in POLICIES:
             raise ValueError(f"unknown policy {policy!r}")
         self.hyps = {h.id: h for h in hypotheses}
@@ -120,7 +134,8 @@ class Investigation:
         self.eps = eps
         self.rng = random.Random(seed)
         self.prediction_eps = prediction_eps
-        self.posteriors = initial_posteriors(hypotheses, no_fault_prior, prior_temper)
+        self.rule_version = rule_version
+        self.posteriors = initial_posteriors(hypotheses, no_fault_prior, prior_temper, other_prior)
         self.steps: list[Step] = []
         self.stop_reason: Optional[str] = None
 
@@ -140,30 +155,48 @@ class Investigation:
     def _predictions(self, key: str) -> dict[str, Optional[str]]:
         return {hid: self._predict(h, key) for hid, h in self.hyps.items()}
 
+    def _h_eps(self, hid: str, key: str, sensor: float) -> float:
+        """Error for one hypothesis's prediction of one probe. v2: the LLM's own error
+        (prediction_eps) applies only to outcomes the LLM actually predicted. The implied
+        "other services look healthy" and the no-fault hypothesis are definitions, not
+        guesses, so they carry only the probe's error. v1 gave "no fault" the LLM's error
+        margin too, so a visibly abnormal reading counted only about a third as strongly
+        against it."""
+        h = self.hyps[hid]
+        if self.rule_version >= 2 and (h.service is None or key not in h.predictions):
+            return sensor
+        return sensor + (1 - sensor) * self.prediction_eps
+
     def eig(self, key: str) -> float:
         probe = self.probes[key]
-        preds, eps, miss = self._predictions(key), self._eps(probe), probe.template.miss
+        preds, e, miss = self._predictions(key), self._sensor_eps(probe), probe.template.miss
+        eps = {h: self._h_eps(h, key, e) for h in self.posteriors}
         prior_h = beliefs.entropy(self.posteriors)
         expected = 0.0
         for y in probe.outcomes:
-            joint = {h: p * likelihood(preds[h], y, probe.outcomes, eps, miss) for h, p in self.posteriors.items()}
+            joint = {h: p * likelihood(preds[h], y, probe.outcomes, eps[h], miss) for h, p in self.posteriors.items()}
             p_y = sum(joint.values())
             if p_y > 0:
                 expected += p_y * beliefs.entropy({h: v / p_y for h, v in joint.items()})
         return max(0.0, prior_h - expected)
 
-    def _update(self, key: str, outcome: str, eps: float) -> dict[str, float]:
+    def _update(self, key: str, outcome: str, sensor: float) -> dict[str, float]:
         probe = self.probes[key]
         preds = self._predictions(key)
-        raw = {h: p * likelihood(preds[h], outcome, probe.outcomes, eps, probe.template.miss)
+        raw = {h: p * likelihood(preds[h], outcome, probe.outcomes, self._h_eps(h, key, sensor),
+                                 probe.template.miss)
                for h, p in self.posteriors.items()}
         z = sum(raw.values())
         return {h: v / z for h, v in raw.items()} if z > 0 else dict(self.posteriors)
 
+    def _sensor_eps(self, probe: ProbeInstance, sensor_eps: Optional[float] = None) -> float:
+        """The probe's own chance of a wrong reading (per-hypothesis prediction error is
+        added in _h_eps)."""
+        return sensor_eps if sensor_eps is not None else (probe.template.eps if self.eps is None else self.eps)
+
     def _eps(self, probe: ProbeInstance, sensor_eps: Optional[float] = None) -> float:
-        """Total chance a reading contradicts a TRUE hypothesis: the probe's own
-        error, or else the LLM's prediction of it being wrong."""
-        e = sensor_eps if sensor_eps is not None else (probe.template.eps if self.eps is None else self.eps)
+        """Total chance a reading contradicts a TRUE LLM-predicted hypothesis."""
+        e = self._sensor_eps(probe, sensor_eps)
         return e + (1 - e) * self.prediction_eps
 
     def _unrun(self) -> list[str]:
@@ -205,8 +238,7 @@ class Investigation:
         if outcome not in probe.outcomes:
             raise ValueError(f"{key}: outcome {outcome!r} not in {probe.outcomes}")
         eig = self.eig(key)
-        e = self._eps(probe, eps)
-        self.posteriors = self._update(key, outcome, e)
+        self.posteriors = self._update(key, outcome, self._sensor_eps(probe, eps))
         self.steps.append(Step(key, outcome, eig, dict(self.posteriors), free, raw[:600], eps, sensor))
 
     def paid_steps(self) -> int:
@@ -215,6 +247,19 @@ class Investigation:
     # ------------------------------------------------------------------ #
     def leader(self) -> BenchHypothesis:
         return self.hyps[max(self.posteriors, key=self.posteriors.get)]
+
+    def service_marginals(self) -> dict[str, float]:
+        """P(the fault is in service s), summed over every hypothesis naming s."""
+        out: dict[str, float] = {}
+        for hid, p in self.posteriors.items():
+            svc = self.hyps[hid].service
+            if svc is not None:
+                out[svc] = out.get(svc, 0.0) + p
+        return out
+
+    def p_fault(self) -> float:
+        """P(something is broken) = 1 − P(no fault): the answer to a detection question."""
+        return 1.0 - sum(p for h, p in self.posteriors.items() if self.hyps[h].service is None)
 
     def surprise(self) -> bool:
         """True when every hypothesis was contradicted by some observation —
@@ -226,6 +271,8 @@ class Investigation:
         # connection errors because geo is down) must not discard the whole list. In the
         # pilot it triggered a needless re-generation call.
         for h in self.hyps.values():
+            if h.catch_all:
+                continue  # predicts nothing, so it can never be contradicted
             if all(h.predictions.get(s.probe) in (None, s.outcome) for s in self.steps):
                 return False
         return True
@@ -240,6 +287,8 @@ class Investigation:
             "lambda": self.lam,
             "leader": self.leader().id,
             "final_confidence": max(self.posteriors.values()),
+            "p_fault": self.p_fault(),
+            "rule_version": self.rule_version,
             "posteriors": self.posteriors,
             "trace": [s.__dict__ for s in self.steps],
         }

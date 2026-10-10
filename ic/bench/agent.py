@@ -24,7 +24,7 @@ from typing import Optional
 from .. import llm
 from . import hypotheses as hyp_gen
 from . import sensors
-from .decide import Investigation
+from .decide import RULE_VERSION, Investigation
 from .probes import _lines_for as _owned_rows, instances, parse_services
 
 
@@ -49,10 +49,12 @@ class VoIAgent:
     def __init__(self, policy: str = "voi", *, lam: float = 0.02,
                  stop_confidence: Optional[float] = None, max_probes: int = 25, seed: int = 0,
                  max_regenerations: int = 1, generate=hyp_gen.generate,
-                 log_reader: Optional[str] = None, read_log=None):
+                 log_reader: Optional[str] = None, read_log=None,
+                 rule_version: Optional[int] = None):
         self.policy = policy
+        self.rule_version = rule_version or int(os.environ.get("IC_RULE_VERSION", RULE_VERSION))
         self.kw = dict(policy=policy, lam=lam, stop_confidence=stop_confidence,
-                       max_probes=max_probes, seed=seed)
+                       max_probes=max_probes, seed=seed, rule_version=self.rule_version)
         self.max_regenerations = max_regenerations
         self._generate = generate  # injectable for offline tests
         # "llm": the LLM labels log_signature readings (grounded, quote-checked);
@@ -127,6 +129,8 @@ class VoIAgent:
             self.gen_meta.append({**meta, "retry": "all_hypotheses_filtered"})
         old_steps = self.inv.steps if self.inv else self._discovery_evidence()
         hyps = hyps + self._safety_net(hyps, old_steps)
+        if self.rule_version >= 2:
+            hyps = hyps + catch_alls(self.services, self.probes)
         self.inv = Investigation(hyps, self.probes, **self.kw)
         for s in old_steps:  # carry evidence over to the new hypothesis set
             self.inv.observe(s.probe, s.outcome, free=s.free, raw=s.raw, eps=s.eps, sensor=s.sensor)
@@ -214,13 +218,37 @@ class VoIAgent:
         """The submit(...) call for this task type, if `lead` is the root cause."""
         faulty = lead.id != hyp_gen.NO_FAULT_ID
         if self.task == "detection":
+            if self.rule_version >= 2:  # "is anything broken?" is a question about P(fault), not the top cause
+                faulty = self.inv.p_fault() > 0.5
             return f'submit("{"Yes" if faulty else "No"}")'
+        if self.rule_version >= 2:
+            # Answer each task by its own marginal: localization and analysis questions
+            # presuppose a fault, so pick the service with the most total belief, not the
+            # single top hypothesis (which can be "no fault" when causes split their mass).
+            svc = self._top_service()
+            if self.task == "analysis":
+                lead = self._best_specific(svc)
+                return "submit(" + json.dumps({"system_level": lead.system_level,
+                                               "fault_type": lead.fault_type}) + ")"
+            return "submit(" + json.dumps([svc] if svc else []) + ")"
         if self.task == "analysis":
             if not faulty:
                 return "submit(None)"
             return "submit(" + json.dumps({"system_level": lead.system_level,
                                            "fault_type": lead.fault_type}) + ")"
         return "submit(" + json.dumps([lead.service] if faulty else []) + ")"
+
+    def _top_service(self) -> Optional[str]:
+        m = self.inv.service_marginals()
+        return max(m, key=m.get) if m else None
+
+    def _best_specific(self, service: Optional[str]):
+        """Most likely LLM or safety-net hypothesis, preferring the given service."""
+        specific = [h for h in self.inv.hyps.values() if h.service is not None and not h.catch_all]
+        same = [h for h in specific if h.service == service] or specific
+        if not same:
+            return self.inv.leader()
+        return max(same, key=lambda h: self.inv.posteriors[h.id])
 
     def _finish(self):
         lead = self.inv.leader()
@@ -232,10 +260,24 @@ class VoIAgent:
             "leader_claim": lead.claim,
             "hypotheses": {h.id: {"service": h.service, "fault_type": h.fault_type,
                                   "system_level": h.system_level, "prior": h.prior,
-                                  "predictions": h.predictions} for h in self.inv.hyps.values()},
+                                  "predictions": h.predictions, "catch_all": h.catch_all}
+                           for h in self.inv.hyps.values()},
             "regenerations": self.regenerations,
             "log_reader": self.log_reader,
             "generation_meta": self.gen_meta,
             "llm_usage": dict(llm.USAGE),
             "wall_seconds": round(time.monotonic() - self.t0, 2),
         }
+
+
+def catch_alls(services: list[str], probes: dict) -> list:
+    """One "some other fault in <service>" hypothesis per service. It predicts no
+    symptoms on its own service (any reading is equally likely) and healthy readings
+    elsewhere, so it gains whenever a service misbehaves in a way none of the LLM's
+    specific causes predicted. Without it, a list of over-specific causes that are all
+    contradicted leaves "no fault" as the best explanation (qwen3:14b run)."""
+    from .decide import BenchHypothesis
+    have = {p.service for p in probes.values()}
+    return [BenchHypothesis(f"U{i + 1}", svc, "Unknown", "Unknown", f"some other fault in {svc}",
+                            0.0, {}, catch_all=True)
+            for i, svc in enumerate(s for s in services if s in have)]
