@@ -160,12 +160,16 @@ class LLMChooserAgent(VoIAgent):
 
 
 def make_agent(policy: str, seed: int = 0):
-    """One factory for all five conditions."""
+    """One factory for all conditions. The decision-rule version is fixed by the
+    condition name, so a result row's `policy` says exactly which rule produced it:
+    voi/random/exhaustive use rule v1 (as originally run), voi2 uses rule v2."""
     if policy == "react":
         return ReActAgent()
     if policy == "llm_choose":
         return LLMChooserAgent()
-    return VoIAgent(policy, seed=seed)
+    if policy == "voi2":
+        return VoIAgent("voi", seed=seed, rule_version=2)
+    return VoIAgent(policy, seed=seed, rule_version=1)
 
 
-POLICIES = ("react", "llm_choose", "voi", "random", "exhaustive")
+POLICIES = ("react", "llm_choose", "voi", "random", "exhaustive", "voi2")

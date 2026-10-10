@@ -25,9 +25,9 @@ import re
 import sys
 from collections import defaultdict
 
-ORDER = ["react", "llm_choose", "voi", "random", "exhaustive"]
+ORDER = ["react", "llm_choose", "voi", "voi2", "random", "exhaustive"]
 LABEL = {"react": "A plain LLM", "llm_choose": "B LLM chooses", "voi": "C VoI (ours)",
-         "random": "D random", "exhaustive": "E exhaustive"}
+         "voi2": "C2 VoI rule v2", "random": "D random", "exhaustive": "E exhaustive"}
 OWN_STOPS = {None, "no_probe_worth_its_cost", "confident", "llm_stop", "no_probes_left"}
 
 

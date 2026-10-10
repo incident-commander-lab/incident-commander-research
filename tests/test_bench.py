@@ -666,3 +666,11 @@ def test_catch_alls_never_count_as_contradicted():
         if not h.catch_all:
             h.predictions = {k: "something_else" for k in h.predictions}
     assert inv.surprise()   # every specific cause contradicted → still triggers re-generation
+
+
+def test_condition_name_fixes_the_rule_version():
+    """voi rows must stay reproducible as originally run (v1); voi2 is the revised rule."""
+    assert baselines.make_agent("voi").rule_version == 1
+    assert baselines.make_agent("random").rule_version == 1
+    assert baselines.make_agent("voi2").rule_version == 2
+    assert baselines.make_agent("voi2").policy == "voi"
