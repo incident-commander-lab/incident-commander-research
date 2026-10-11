@@ -5,7 +5,11 @@
 #   ~/ic-bench.sh night 1   qwen3:8b — ours, random, run-everything   (~13 h)
 #   ~/ic-bench.sh night 2   qwen3:8b — plain LLM, LLM-chooser          (~13 h)
 #   ~/ic-bench.sh night 3   qwen3:14b — plain LLM, ours                (~14 h, optional)
+#   ~/ic-bench.sh night 4   rule v2 (8B, then 14B) + 3 plain-LLM retries
+#   ~/ic-bench.sh night 5   qwen3:8b — re-run every run that touched a broken check (catalog v2 fix)  (~10 h)
+#   ~/ic-bench.sh night 6   qwen3:14b — same re-runs + the 14B LLM-chooser                          (~10 h)
 #   ~/ic-bench.sh status    progress, any time (also safe while a night runs)
+#   ~/ic-bench.sh watch     status, refreshed every 5 min (Ctrl-C to stop watching; the run continues)
 #   ~/ic-bench.sh redo <text>  forget results whose problem name contains <text>, so the next night re-runs them
 #   ~/ic-bench.sh fetch     copy results to the laptop
 #   ~/ic-bench.sh table     results table (after fetch)
@@ -118,7 +122,7 @@ for pol in $POLICIES; do for p in $PROBLEMS; do
     sleep 30
   done
   echo "$(date -u '+%F %T') START $MODEL $pol $p" >> "$PROG"
-  timeout 2700 ~/.local/bin/poetry run python -m ic.bench.run_aiopslab --policy "$pol" --problems "$p" \
+  timeout ${IC_RUN_TIMEOUT:-2700} ~/.local/bin/poetry run python -m ic.bench.run_aiopslab --policy "$pol" --problems "$p" \
       --max-steps 30 --out "$OUT" > "$LOGS/${MODEL//:/_}__${pol}__${p}.log" 2>&1
   echo "$(date -u '+%F %T') END   $MODEL $pol $p exit=$?" >> "$PROG"
   pkill -f "kubectl port-forward" 2>/dev/null
@@ -132,11 +136,30 @@ RUNNER
   onhost 60 "$TMP/runner.sh" | grep -q runner-installed && echo "runner installed" || { echo "runner install failed"; exit 1; }
 }
 
+archive_catalog_v1() {   # once: set aside every run that touched a broken check, so nights 5-6 re-run it
+  host 60 "python3 - <<'PY'
+import json, os
+p = os.path.expanduser('~/results/full_rq1.jsonl')
+a = os.path.expanduser('~/results/full_rq1_catalog_v1_archive.jsonl')
+if os.path.exists(a):
+    print('catalog v1 runs already archived'); raise SystemExit
+ALIAS = {'flagd', 'jaeger-out'}
+def touched(r):
+    return any(isinstance(s, dict) and s.get('probe', ':').split(':', 1)[1] in ALIAS for s in r.get('trace') or [])
+rows = [json.loads(l) for l in open(p)]
+old = [r for r in rows if r.get('catalog_version') is None and touched(r)]
+keep = [r for r in rows if not (r.get('catalog_version') is None and touched(r))]
+open(a, 'w').writelines(json.dumps(r) + '\\n' for r in old)
+open(p, 'w').writelines(json.dumps(r) + '\\n' for r in keep)
+print(f'archived {len(old)} catalog-v1 runs to {a}; they will be re-run')
+PY"
+}
+
 start_laptop_side() {   # start_laptop_side <model>
   say "Laptop: model server, tunnel, keep-awake"
   pgrep -x ollama >/dev/null || (OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE=q8_0 nohup ollama serve > "$HOME/.ollama/logs/serve-bench.log" 2>&1 &)
   for _ in $(seq 1 20); do curl -sf 127.0.0.1:11434/api/version >/dev/null && break; sleep 1; done
-  ollama list | grep -q "^$1" || { echo "model $1 is not downloaded: ollama pull $1"; exit 1; }
+  ollama list 2>/dev/null | grep "^$1" >/dev/null || { echo "model $1 is not downloaded: ollama pull $1"; exit 1; }
   curl -s 127.0.0.1:11434/api/generate -d "{\"model\":\"$1\",\"prompt\":\"hi\",\"stream\":false,\"keep_alive\":\"24h\"}" >/dev/null
   pkill -f "ssh -i.*ic-bench-tunnel" 2>/dev/null || true; sleep 1
   git -C "$REPO" show "$BRANCH:infra/tunnel.sh" > "$HOME/.ic-bench-tunnel.sh"; chmod +x "$HOME/.ic-bench-tunnel.sh"
@@ -180,11 +203,22 @@ night)
     1) MODEL=qwen3:8b;  POLICIES="voi random exhaustive";;
     2) MODEL=qwen3:8b;  POLICIES="react llm_choose";;
     3) MODEL=qwen3:14b; POLICIES="react voi";;
-    *) echo "usage: ~/ic-bench.sh night 1|2|3"; exit 1;;
+    4) MODEL=qwen3:14b; POLICIES="voi2 (8B, then 14B) + 3 react retries";;  # rule v2 rerun
+    5) MODEL=qwen3:8b;  POLICIES="voi voi2 random exhaustive llm_choose";;   # catalog v2 re-runs
+    6) MODEL=qwen3:14b; POLICIES="voi voi2 llm_choose";;                     # catalog v2 re-runs + 14B LLM-chooser
+    *) echo "usage: ~/ic-bench.sh night 1|2|3|4|5|6"; exit 1;;
   esac
   ensure_running; sync_code; start_laptop_side "$MODEL"
+  case "$2" in 5|6) archive_catalog_v1;; esac
   say "Starting night $2: $MODEL — $POLICIES"
-  host 30 "nohup ~/run_chunk.sh $MODEL $POLICIES > ~/results/chunk_driver.log 2>&1 & sleep 3; tail -1 ~/results/full_progress.txt"
+  if [ "$2" = 6 ]; then
+    host 30 "nohup bash -c 'IC_RUN_TIMEOUT=5400 ~/run_chunk.sh qwen3:14b voi voi2 llm_choose' > ~/results/chunk_driver.log 2>&1 & sleep 3; tail -1 ~/results/full_progress.txt"
+  elif [ "$2" = 4 ]; then
+    # both models in one go; 14B react retries get 90 min (Low Power Mode timeouts at 45)
+    host 30 "nohup bash -c '~/run_chunk.sh qwen3:8b voi2; IC_RUN_TIMEOUT=5400 ~/run_chunk.sh qwen3:14b voi2 react; echo \"\$(date -u \"+%F %T\") NIGHT_DONE 4\" >> ~/results/full_progress.txt' > ~/results/chunk_driver.log 2>&1 & sleep 3; tail -1 ~/results/full_progress.txt"
+  else
+    host 30 "nohup ~/run_chunk.sh $MODEL $POLICIES > ~/results/chunk_driver.log 2>&1 & sleep 3; tail -1 ~/results/full_progress.txt"
+  fi
   pkill -f "ic-bench-watch" 2>/dev/null || true
   ( nohup bash -c 'exec -a ic-bench-watch bash "$0" _watch "$1"' "$0" "$2" > "$HOME/.ic-bench-watch.log" 2>&1 & )
   say "Running. You will get a Mac notification (with a sound) when night $2 finishes or if it stops early."
@@ -196,7 +230,9 @@ _watch)
     sleep 600
     L=$(host 60 'tail -1 ~/results/full_progress.txt 2>/dev/null' | tail -1)
     case "$L" in
-      *CHUNK_DONE*) osascript -e "display notification \"Night ${2:-} finished. Run: ~/ic-bench.sh pause\" with title \"Incident Commander benchmark\" sound name \"Glass\""; exit 0;;
+      *CHUNK_DONE*|*NIGHT_DONE*)
+        case "${2:-}:$L" in 4:*NIGHT_DONE*|[12356]:*) ;; *) continue;; esac  # night 4 = two chunks
+        osascript -e "display notification \"Night ${2:-} finished. Run: ~/ic-bench.sh pause\" with title \"Incident Commander benchmark\" sound name \"Glass\""; exit 0;;
       *STOPPED*)    osascript -e "display notification \"Night ${2:-} stopped early (tunnel down). Run the same night command again.\" with title \"Incident Commander benchmark\" sound name \"Basso\""; exit 0;;
     esac
   done
@@ -223,7 +259,7 @@ status)
 echo
 LAST=$(tail -1 ~/results/full_progress.txt 2>/dev/null)
 case "$LAST" in
-  *CHUNK_DONE*) echo ">>> NIGHT FINISHED. Next: ~/ic-bench.sh pause  (then the next night when you can)";;
+  *NIGHT_DONE*|*CHUNK_DONE*) echo ">>> NIGHT FINISHED. Next: ~/ic-bench.sh pause  (then the next night when you can)";;
   *WAITING*)    echo ">>> WAITING for the laptop model (retrying for up to 30 min): $LAST";;
   *STOPPED*)    echo ">>> STOPPED EARLY: $LAST. Run the same night command again; it continues where it left off.";;
   *PAUSED*)     echo ">>> PAUSED. Run the same night command again to continue.";;
@@ -232,9 +268,13 @@ case "$LAST" in
 esac
 python3 - <<"PY"
 import json, collections, os, re, datetime
-NIGHTS = {("qwen3:8b", frozenset({"voi", "random", "exhaustive"})): 1,
+NIGHTS = {("qwen3:8b", frozenset({"voi", "voi2", "random", "exhaustive", "llm_choose"})): 5,
+          ("qwen3:14b", frozenset({"voi", "voi2", "llm_choose"})): 6,
+          ("qwen3:8b", frozenset({"voi", "random", "exhaustive"})): 1,
           ("qwen3:8b", frozenset({"react", "llm_choose"})): 2,
-          ("qwen3:14b", frozenset({"react", "voi"})): 3}
+          ("qwen3:14b", frozenset({"react", "voi"})): 3,
+          ("qwen3:8b", frozenset({"voi2"})): 4,
+          ("qwen3:14b", frozenset({"voi2", "react"})): 4}
 PER_POLICY = int(open(os.path.expanduser("~/results/problem_count.txt")).read().strip() or 73) if os.path.exists(os.path.expanduser("~/results/problem_count.txt")) else 73
 prog = os.path.expanduser("~/results/full_progress.txt")
 out = os.path.expanduser("~/results/full_rq1.jsonl")
@@ -271,6 +311,9 @@ print("\nfinished so far:")
 for k in sorted(c, key=str): print(f"  {k[0]:10} {k[1]:11} {c[k]:3}/{PER_POLICY}   correct {ok[k]}")
 PY' || true
   true
+  ;;
+watch)
+  while true; do clear; date; "$0" status || true; echo; echo "(refreshes every 5 min; Ctrl-C stops watching, not the run)"; sleep 300; done
   ;;
 fetch)
   ensure_running
