@@ -674,3 +674,33 @@ def test_condition_name_fixes_the_rule_version():
     assert baselines.make_agent("random").rule_version == 1
     assert baselines.make_agent("voi2").rule_version == 2
     assert baselines.make_agent("voi2").policy == "voi"
+
+
+# --- catalog v2: alias services and tool errors (found auditing the full RQ1 run) ---
+def test_alias_services_are_dropped_but_scaled_to_zero_services_are_kept():
+    from ic.bench.probes import parse_workloads, real_services
+    pods = ("NAME READY STATUS RESTARTS AGE\n"
+            "jaeger-7d8548779-n4q6c 1/1 Running 0 5m\n"
+            "geo-c47ff745-5bgdz 1/1 Running 0 5m\n")
+    workloads = parse_workloads("deployment.apps/jaeger 1/1 1 1 5m\n"
+                                "deployment.apps/geo 1/1 1 1 5m\n"
+                                "deployment.apps/user 0/0 0 0 5m\n"
+                                "statefulset.apps/mongodb-geo 1/1 5m\n")
+    assert workloads == {"jaeger", "geo", "user", "mongodb-geo"}
+    kept = real_services(["jaeger", "jaeger-out", "geo", "user", "mongodb-geo"], pods, workloads)
+    assert kept == ["jaeger", "geo", "user", "mongodb-geo"]   # 'user' has no pods: scaled to zero, kept
+
+
+def test_tool_error_is_no_evidence_but_still_costs_a_step():
+    from ic.bench.probes import tool_error
+    assert tool_error("Error: Your service/namespace does not exist. Use kubectl to check.\n")
+    assert tool_error('[ERROR] Docker command execution failed: Error from server (NotFound): '
+                      'deployments.apps "jaeger-out" not found')
+    assert not tool_error("[ERROR] Docker command execution failed: \n")   # empty grep = no rows
+    inv = Investigation([BenchHypothesis("H1", "geo", "f", "App", "", 0.5, {"pod_health:geo": "unhealthy"}),
+                         BenchHypothesis("H0", None, "none", "none", "", 0.5, {})],
+                        instances(["geo"]), policy="voi")
+    before = dict(inv.posteriors)
+    inv.mark_unavailable("pod_health:geo")
+    assert inv.posteriors == before and inv.paid_steps() == 1
+    assert "pod_health:geo" not in inv._unrun()

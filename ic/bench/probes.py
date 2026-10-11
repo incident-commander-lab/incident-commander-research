@@ -291,3 +291,35 @@ def parse_services(kubectl_get_svc: str) -> list[str]:
         if len(cols) >= 2 and cols[1] in types:
             names.append(cols[0])
     return names
+
+
+def parse_workloads(kubectl_get_workloads: str) -> set[str]:
+    """Names from `kubectl get deploy,statefulset -n <ns> --no-headers`
+    ('deployment.apps/geo   1/1 ...' -> 'geo')."""
+    names = set()
+    for ln in kubectl_get_workloads.splitlines():
+        cols = ln.split()
+        if cols and "/" in cols[0] and cols[0].split("/", 1)[0].startswith(("deployment", "statefulset")):
+            names.add(cols[0].split("/", 1)[1])
+    return names
+
+
+def real_services(services: list[str], pods_output: str, workloads: set[str]) -> list[str]:
+    """Services that are a workload of their own: some pod is owned by a workload of
+    that name, or a Deployment/StatefulSet of that name exists (so a service scaled
+    to zero is kept). Drops alias Services such as social-network's 'jaeger-out',
+    which selects another workload's pods: every check on it reads 'broken' (no pods,
+    no deployment) and fed false fault evidence in the full RQ1 run (catalog v1)."""
+    owners = {pod_owner(ln.split()[0]) for ln in pods_output.splitlines() if ln.split()}
+    return [s for s in services if s in owners or s in workloads]
+
+
+# Replies meaning the TOOL could not address the service, not that the service is
+# broken. AIOpsLab's get_logs answers 'Error: Your service/namespace does not exist'
+# for astronomy-shop's flagd although its pod runs; catalog v1 read that as a crash.
+_TOOL_ERRORS = ("Error: Your service/namespace does not exist", "Error from server (NotFound)")
+
+
+def tool_error(output: str) -> bool:
+    return any(m in output[:300] for m in _TOOL_ERRORS)
+

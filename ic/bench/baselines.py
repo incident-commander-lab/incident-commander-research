@@ -119,7 +119,7 @@ class LLMChooserAgent(VoIAgent):
 
     def _next(self) -> str:
         inv = self.inv
-        unrun = [k for k in self.probes if k not in {s.probe for s in inv.steps}]
+        unrun = [k for k in self.probes if k not in {s.probe for s in inv.steps} | set(inv.unavailable)]
         if not unrun or inv.paid_steps() >= inv.max_probes:   # free discovery readings do not count
             inv.stop_reason = "no_probes_left" if not unrun else "budget"
             return self._stop(None)

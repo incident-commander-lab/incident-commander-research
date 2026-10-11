@@ -137,6 +137,7 @@ class Investigation:
         self.rule_version = rule_version
         self.posteriors = initial_posteriors(hypotheses, no_fault_prior, prior_temper, other_prior)
         self.steps: list[Step] = []
+        self.unavailable: list[str] = []  # probes whose tool failed: paid for, no evidence
         self.stop_reason: Optional[str] = None
 
     # ------------------------------------------------------------------ #
@@ -200,7 +201,7 @@ class Investigation:
         return e + (1 - e) * self.prediction_eps
 
     def _unrun(self) -> list[str]:
-        done = {s.probe for s in self.steps}
+        done = {s.probe for s in self.steps} | set(self.unavailable)
         return [k for k in self.probes if k not in done]
 
     # ------------------------------------------------------------------ #
@@ -241,8 +242,13 @@ class Investigation:
         self.posteriors = self._update(key, outcome, self._sensor_eps(probe, eps))
         self.steps.append(Step(key, outcome, eig, dict(self.posteriors), free, raw[:600], eps, sensor))
 
+    def mark_unavailable(self, key: str) -> None:
+        """The probe ran but its tool could not read the service: spend the step,
+        update nothing."""
+        self.unavailable.append(key)
+
     def paid_steps(self) -> int:
-        return sum(1 for s in self.steps if not s.free)
+        return sum(1 for s in self.steps if not s.free) + len(self.unavailable)
 
     # ------------------------------------------------------------------ #
     def leader(self) -> BenchHypothesis:
@@ -284,6 +290,7 @@ class Investigation:
             "free_observations": len(self.steps) - self.paid_steps(),
             "probe_cost": sum(self.probes[s.probe].cost for s in self.steps if not s.free),
             "stop_reason": self.stop_reason,
+            "unavailable_probes": list(self.unavailable),
             "lambda": self.lam,
             "leader": self.leader().id,
             "final_confidence": max(self.posteriors.values()),

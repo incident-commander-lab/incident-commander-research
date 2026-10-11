@@ -25,7 +25,11 @@ from .. import llm
 from . import hypotheses as hyp_gen
 from . import sensors
 from .decide import RULE_VERSION, Investigation
-from .probes import _lines_for as _owned_rows, instances, parse_services
+from .probes import (_lines_for as _owned_rows, instances, parse_services, parse_workloads,
+                     real_services, tool_error)
+
+CATALOG_VERSION = 2  # 1 = full RQ1 run before the alias-service / tool-error fix
+_WORKLOADS_END = "===END-WORKLOADS==="
 
 
 def task_type(problem: str) -> str:
@@ -91,10 +95,18 @@ class VoIAgent:
             self.observations["kubectl get svc"] = state
             self.services = parse_services(state)
             self.phase = "propose"
-            return _block(f'exec_shell("kubectl get pods -n {self.ns}")')
+            # Workloads ride along in the same step (no extra AIOpsLab action), before the
+            # pod listing so the call still reads as `kubectl get pods`.
+            return _block(f'exec_shell("kubectl get deploy,statefulset -n {self.ns} --no-headers; '
+                          f'echo {_WORKLOADS_END}; kubectl get pods -n {self.ns}")')
 
         if self.phase == "propose":
-            self.observations["kubectl get pods"] = state
+            workloads_out, _, pods = state.rpartition(_WORKLOADS_END)
+            self.observations["kubectl get pods"] = pods.strip("\n") if workloads_out else state
+            kept = real_services(self.services, self.observations["kubectl get pods"],
+                                 parse_workloads(workloads_out))
+            self.dropped_services = [s for s in self.services if s not in kept]
+            self.services = kept or self.services  # never end up with an empty catalog
             self.probes = instances(self.services)
             try:
                 self._propose()
@@ -128,12 +140,14 @@ class VoIAgent:
             hyps, meta = self._generate(self.problem, self.services, self.probes, obs, findings)
             self.gen_meta.append({**meta, "retry": "all_hypotheses_filtered"})
         old_steps = self.inv.steps if self.inv else self._discovery_evidence()
+        old_unavailable = self.inv.unavailable if self.inv else []
         hyps = hyps + self._safety_net(hyps, old_steps)
         if self.rule_version >= 2:
             hyps = hyps + catch_alls(self.services, self.probes)
         self.inv = Investigation(hyps, self.probes, **self.kw)
         for s in old_steps:  # carry evidence over to the new hypothesis set
             self.inv.observe(s.probe, s.outcome, free=s.free, raw=s.raw, eps=s.eps, sensor=s.sensor)
+        self.inv.unavailable = list(old_unavailable)
 
     def _safety_net(self, hyps: list, steps: list) -> list:
         """A service whose pod is visibly unhealthy always has at least one fault
@@ -170,6 +184,9 @@ class VoIAgent:
 
     def _observe_pending(self, state: str) -> None:
         probe = self.inv.probes[self.pending]
+        if tool_error(state):
+            self.inv.mark_unavailable(self.pending)
+            return
         label, eps, sensor = probe.label(state), None, None
         # "llm": ask the LLM only where the regex is blind — it reads "clean". A regex hit
         # (e.g. connection_errors) is already a concrete label; re-reading it was a wasted
@@ -263,6 +280,8 @@ class VoIAgent:
                                   "predictions": h.predictions, "catch_all": h.catch_all}
                            for h in self.inv.hyps.values()},
             "regenerations": self.regenerations,
+            "catalog_version": CATALOG_VERSION,
+            "dropped_services": getattr(self, "dropped_services", []),
             "log_reader": self.log_reader,
             "generation_meta": self.gen_meta,
             "llm_usage": dict(llm.USAGE),
