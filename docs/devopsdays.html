@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Incident Commander — DevOpsDays Cairo 2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #ffffff;
+    --card: #ffffff;
+    --ink: #0c1b2e;
+    --muted: #5c6d7e;
+    --line: rgba(12, 27, 46, .10);
+    --line2: rgba(12, 27, 46, .16);
+    --accent: #0e326e;
+    --blue: #0c2a5c;
+    --blue-deep: #071833;
+    --blue-lift: #1a4a96;
+    --navy: #08111c;
+    --ease: cubic-bezier(.16, 1, .3, 1);
+    --sans: Inter, "Segoe UI", sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; scroll-snap-type: y mandatory; }
+  body {
+    background: var(--bg); color: var(--ink); font-family: var(--sans);
+    -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility;
+  }
+  #progress { position: fixed; left: 0; top: 0; height: 2px; width: 0; background: var(--accent); z-index: 40; }
+  a { color: inherit; text-decoration: none; }
+  nav {
+    position: fixed; inset: 0 0 auto 0; z-index: 30; height: 64px;
+    display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    padding: 0 28px; color: var(--ink);
+    background: rgba(255, 255, 255, .92);
+    backdrop-filter: blur(18px);
+    border-bottom: 1px solid var(--line);
+  }
+  .brand { font-weight: 650; letter-spacing: -.03em; white-space: nowrap; }
+  .nav-links { display: flex; gap: 18px; overflow: auto; scrollbar-width: none; }
+  .nav-links::-webkit-scrollbar { display: none; }
+  .nav-links a {
+    position: relative;
+    font-size: 13px; color: rgba(12, 27, 46, .62); white-space: nowrap;
+    transition: color .35s var(--ease);
+  }
+  .nav-links a::after {
+    content: ""; position: absolute; left: 0; right: 100%; bottom: -7px; height: 1.5px;
+    background: var(--accent); transition: right .45s var(--ease);
+  }
+  .nav-links a:hover, .nav-links a.on { color: var(--accent); }
+  .nav-links a:hover::after, .nav-links a.on::after { right: 0; }
+
+  .wrap { width: min(1140px, calc(100% - 48px)); margin: 0 auto; }
+  .kicker {
+    font-family: var(--mono); font-size: 13px; letter-spacing: .16em;
+    text-transform: uppercase; color: var(--accent); font-weight: 500;
+  }
+  h1, h2 { letter-spacing: -.045em; line-height: 1.05; font-weight: 700; }
+  h2 { font-size: clamp(34px, 4.4vw, 54px); max-width: 18em; }
+  header.hero, section[id] {
+    height: 100vh; height: 100dvh;
+    scroll-snap-align: start; scroll-snap-stop: always;
+    overflow-x: hidden; overflow-y: auto;
+    display: flex; flex-direction: column; justify-content: safe center;
+    padding: 88px 0 40px; box-sizing: border-box;
+  }
+  .lead { margin-top: 14px; font-size: 20px; line-height: 1.45; color: var(--muted); max-width: 42em; }
+
+  .reveal {
+    opacity: 0; transform: translateY(42px) scale(.985);
+    transition: opacity 1s var(--ease), transform 1.05s var(--ease);
+  }
+  .reveal.in { opacity: 1; transform: none; }
+
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 22px;
+    box-shadow: 0 18px 50px rgba(8, 17, 28, .06);
+    padding: 26px 28px 22px;
+    transition: transform .5s var(--ease), box-shadow .5s var(--ease);
+  }
+  .card:hover { transform: translateY(-6px); box-shadow: 0 28px 60px rgba(8, 17, 28, .12); }
+  .eyebrow {
+    font-family: var(--mono); font-size: 12px; letter-spacing: .14em;
+    text-transform: uppercase; color: var(--muted);
+  }
+  .src { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .src .who { display: block; font-weight: 650; font-size: 15px; }
+  .src .id { display: block; margin-top: 3px; font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.4; }
+  .reading { margin-top: 14px; color: var(--muted); font-size: 16px; line-height: 1.45; }
+
+  .hero { padding: 72px 0 28px; }
+  .stage {
+    width: min(1320px, calc(100% - 64px)); margin: auto;
+    display: grid; grid-template-columns: 1.25fr .85fr;
+    min-height: min(780px, calc(100dvh - 150px));
+    border-radius: 40px; overflow: hidden;
+    box-shadow: 0 40px 90px rgba(7, 24, 51, .18);
+  }
+  .stage-copy {
+    position: relative; color: #fff; padding: 64px 56px;
+    display: flex; flex-direction: column; justify-content: center;
+    background:
+      radial-gradient(520px 280px at 18% 0%, rgba(90, 150, 255, .28), transparent 60%),
+      linear-gradient(165deg, var(--blue-deep) 0%, var(--blue) 58%, var(--blue-lift) 140%);
+  }
+  .stage-copy .kicker { color: #c5d6ff; }
+  .stage h1 { margin-top: 20px; font-size: clamp(72px, 7.4vw, 112px); color: #fff; line-height: .9; }
+  .tagline { margin-top: 22px; max-width: 14em; font-size: clamp(22px, 2.2vw, 30px); color: rgba(255,255,255,.88); }
+  .stage-copy .ask {
+    margin-top: 32px; padding-top: 18px; border-top: 1px solid rgba(255,255,255,.2);
+    font-family: var(--mono); font-size: 16px; letter-spacing: .02em; color: #d5e2ff;
+  }
+  .stage-people {
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 48px 40px; background:
+      radial-gradient(280px 180px at 100% 0%, rgba(26, 74, 150, .12), transparent 70%), #fff;
+  }
+  .rise { animation: rise 1s var(--ease) both; }
+  .d1 { animation-delay: .12s; }
+  .d2 { animation-delay: .28s; }
+  .d3 { animation-delay: .42s; }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(26px); }
+    to { opacity: 1; transform: none; }
+  }
+  .team { display: flex; flex-direction: column; gap: 32px; }
+  .team figure { display: flex; align-items: center; gap: 18px; }
+  .avatar {
+    width: 108px; height: 108px; border-radius: 50%; overflow: hidden; flex: none;
+    border: 2px solid rgba(14, 50, 110, .22); background: #e7eef8;
+  }
+  .avatar img { width: 100%; height: 100%; object-fit: cover; transform: scale(1.08); }
+  .team strong { display: block; font-size: 22px; letter-spacing: -.03em; color: var(--ink); }
+  .team span { display: block; color: var(--muted); font-size: 16px; line-height: 1.35; margin-top: 2px; }
+  .team .major { color: var(--accent); font-weight: 600; }
+  .team .uni { color: var(--ink); font-weight: 600; }
+
+  .papers, .grid4, .three, .sust, .roi, .terms { display: grid; gap: 16px; margin-top: 32px; }
+  .papers, .three, .sust, .roi, .terms { grid-template-columns: repeat(3, 1fr); }
+  .grid4 { grid-template-columns: 1fr 1fr; }
+  .metric .num { font-size: clamp(36px, 4vw, 52px); font-weight: 700; letter-spacing: -.04em; color: var(--accent); line-height: 1; }
+  .metric .line { margin-top: 12px; font-size: 18px; line-height: 1.35; }
+  .banner {
+    margin-top: 16px; border-radius: 16px; border: 1px solid var(--line2);
+    background: var(--card); padding: 18px 22px; display: flex; gap: 16px; align-items: baseline;
+    font-size: 18px;
+  }
+  .banner b { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); font-weight: 500; flex: none; }
+
+  table.extract, table.data, table.auto { width: 100%; border-collapse: collapse; }
+  table.extract th, table.data th, table.auto th {
+    text-align: left; font-family: var(--mono); font-size: 12px; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--muted); font-weight: 500; padding: 8px 0; border-bottom: 1px solid var(--line2);
+  }
+  table.extract td { padding: 12px 8px 12px 0; font-size: 18px; border-bottom: 1px solid var(--line); }
+  table.extract td.n, table.data td.n, table.data th.n { text-align: right; font-family: var(--mono); color: var(--accent); font-weight: 500; }
+  table.data td, table.auto td { padding: 14px 10px 14px 0; font-size: 17px; border-bottom: 1px solid var(--line); }
+  table.auto tr.stop td { background: rgba(22,62,150,.08); }
+  .no { color: var(--muted); font-family: var(--mono); }
+  .yes { color: var(--accent); font-family: var(--mono); }
+  .check { color: #0d7a4f; }
+  table.data .ours { background: rgba(22,62,150,.1); }
+  .block-label { margin: 28px 0 8px; font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); }
+  .band { margin-top: 18px; font-size: 18px; }
+  .band span { color: var(--accent); font-weight: 650; }
+
+  .pillar { border-top: 1px solid var(--line2); padding-top: 18px; }
+  .pillar .word { font-size: clamp(42px, 5vw, 64px); font-weight: 700; letter-spacing: -.05em; }
+  .pillar .when { margin-top: 6px; color: var(--muted); font-size: 18px; }
+  .pillar .how { margin-top: 18px; font-size: 18px; line-height: 1.4; }
+  .sentence { margin-top: 36px; font-size: clamp(22px, 2.4vw, 30px); font-weight: 550; letter-spacing: -.03em; max-width: 22em; }
+
+  .flow { display: grid; grid-template-columns: 1fr 36px 1fr 36px 1fr 36px 1fr; gap: 0; align-items: stretch; margin-top: 28px; }
+  .flow.after { grid-template-columns: 1fr 36px 1.2fr 36px 1fr; }
+  .node {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px;
+    transition: transform .5s var(--ease);
+  }
+  .node:hover { transform: translateY(-4px); }
+  .node small { font-family: var(--mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .node b { display: block; margin-top: 4px; font-size: 20px; letter-spacing: -.03em; }
+  .node em { display: block; margin-top: 6px; font-style: normal; font-size: 14px; color: var(--muted); line-height: 1.35; }
+  .edge { display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 11px; letter-spacing: .1em; color: var(--muted); }
+  .edge.arr::before { content: ""; width: 18px; height: 1.5px; background: #8aa0b0; }
+  .edge.arr::after { content: ""; width: 7px; height: 7px; margin-left: -6px; border-top: 1.5px solid #8aa0b0; border-right: 1.5px solid #8aa0b0; transform: rotate(45deg); }
+  .gate {
+    margin-top: 14px; display: flex; align-items: center; justify-content: space-between; gap: 18px;
+    background: var(--accent); color: #fff; border-radius: 18px; padding: 20px 24px;
+  }
+  .gate small { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: rgba(255,255,255,.82); }
+  .gate b { display: block; margin-top: 4px; font-size: 28px; letter-spacing: -.03em; }
+  .gate em { display: block; margin-top: 4px; font-style: normal; color: rgba(255,255,255,.92); }
+  .stamp { font-family: var(--mono); letter-spacing: .16em; border: 1.5px solid #fff; border-radius: 999px; padding: 8px 14px; }
+  .loop { margin-top: 14px; color: var(--muted); }
+
+  .strip {
+    margin-top: 18px; display: flex; justify-content: space-between; gap: 16px; align-items: center;
+    background: var(--navy); color: #f4f8fc; border-radius: 14px; padding: 16px 20px; font-size: 18px;
+  }
+  .strip span { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #9db7ff; }
+
+  .cols6 { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; margin-top: 28px; }
+  .col { border-top: 2px solid var(--line2); padding-top: 12px; }
+  .col.policy { border-top-color: var(--accent); }
+  .col h3 { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .col.policy h3 { color: var(--accent); }
+  .col li { list-style: none; margin-top: 10px; font-size: 15px; line-height: 1.35; }
+  .ticks { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 22px; font-family: var(--mono); font-size: 13px; color: var(--muted); }
+  .ticks b { color: var(--ink); font-weight: 500; }
+  .callout { margin-top: 18px; border-radius: 16px; border: 1px solid var(--line); border-left: 4px solid var(--accent); background: var(--card); padding: 18px 20px; }
+  .flag { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+
+  .demo {
+    background:
+      radial-gradient(520px 280px at 50% 0%, rgba(90, 150, 255, .22), transparent 60%),
+      linear-gradient(165deg, var(--blue-deep), var(--blue) 62%, #12367a);
+    color: #fff; text-align: center;
+  }
+  .play {
+    width: 88px; height: 88px; margin: 0 auto 24px; border-radius: 50%;
+    border: 1px solid rgba(255,255,255,.45); display: grid; place-items: center;
+    animation: pulse 2.8s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,255,255,.35); }
+    70% { box-shadow: 0 0 0 18px rgba(255,255,255,0); }
+  }
+  .demo h2 { font-size: clamp(56px, 8vw, 96px); max-width: none; color: #fff; }
+  .demo .sub { margin-top: 14px; font-size: clamp(20px, 2.4vw, 32px); color: rgba(255,255,255,.9); }
+  .demo .quiet { margin-top: 16px; color: rgba(255,255,255,.82); font-size: 20px; }
+  .demo .path { margin-top: 28px; font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: #dbe6ff; }
+
+  .incident { display: flex; justify-content: space-between; align-items: baseline; margin: 22px 0 8px; }
+  .incident b { font-size: 22px; }
+  .incident span { font-family: var(--mono); color: var(--accent); }
+  ol.tl { list-style: none; }
+  ol.tl li {
+    display: grid; grid-template-columns: 72px 1.1fr 1.4fr; gap: 10px; align-items: baseline;
+    padding: 8px 10px; border-radius: 8px; font-size: 16px;
+  }
+  ol.tl time { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+  ol.tl .d { color: var(--muted); }
+  ol.tl li.hot { background: rgba(22,62,150,.1); }
+  ol.tl li.hot b { color: var(--accent); }
+  .allow { color: #0d7a4f; font-family: var(--mono); font-size: 13px; letter-spacing: .08em; }
+
+  .bench { display: grid; grid-template-columns: 1.4fr .7fr .7fr; margin-top: 12px; }
+  .bench div { padding: 16px 8px; border-bottom: 1px solid var(--line); font-size: 20px; }
+  .bench .h { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .bench .on { color: var(--accent); font-weight: 650; }
+  .same { margin-top: 20px; font-size: 18px; }
+
+  .term {
+    background: var(--navy); color: #e7eef6; border-radius: 22px; padding: 28px 26px;
+    font-family: var(--mono); font-size: 15px; line-height: 1.6; min-height: 240px;
+    display: flex; flex-direction: column;
+  }
+  .term .ok { color: #7ddea8; margin-top: auto; font-size: 22px; padding-top: 20px; }
+  .term .bad { color: #ffb0a4; margin-top: auto; font-size: 22px; padding-top: 20px; }
+  .terms { grid-template-columns: 1fr 1fr; }
+
+  .roi section {
+    border: 1px solid var(--line); border-radius: 22px; padding: 22px; background: var(--card);
+    display: flex; flex-direction: column; gap: 16px;
+    transition: transform .5s var(--ease), box-shadow .5s var(--ease);
+  }
+  .roi section:hover { transform: translateY(-6px); box-shadow: 0 28px 60px rgba(8,17,28,.1); }
+  .roi h3 { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .roi article b { display: block; font-size: 26px; letter-spacing: -.03em; }
+  .roi article span { display: block; margin-top: 2px; color: var(--muted); font-size: 15px; }
+  .roi .result { background: rgba(22,62,150,.08); border-color: rgba(22,62,150,.35); }
+  .roi .result h3, .roi .note b { color: var(--accent); }
+  .roi .note b { font-family: var(--mono); font-size: 14px; letter-spacing: .12em; text-transform: uppercase; }
+  .formula { margin-top: 22px; display: flex; justify-content: space-between; gap: 18px; align-items: end; flex-wrap: wrap; }
+  .formula code { font-family: var(--mono); font-size: 13px; color: var(--accent); background: #fff; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .map { margin-top: 10px; font-family: var(--mono); font-size: 13px; color: var(--muted); }
+
+  .stat { font-size: clamp(48px, 6vw, 72px); font-weight: 700; letter-spacing: -.05em; color: var(--accent); line-height: 1; }
+  .claim { margin-top: 10px; font-size: 18px; line-height: 1.35; }
+  .live-line { margin-top: 22px; font-size: 18px; }
+  .closer { margin-top: 28px; padding-top: 22px; border-top: 1px solid var(--line2); font-size: clamp(28px, 3.4vw, 42px); font-weight: 700; letter-spacing: -.04em; line-height: 1.15; max-width: 18em; }
+  footer.site { padding: 28px 0 8px; font-family: var(--mono); font-size: 13px; color: var(--muted); letter-spacing: .04em; }
+
+  .chain { margin-top: 28px; display: grid; gap: 8px; justify-items: start; }
+  .chain .step {
+    background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+    padding: 14px 18px; box-shadow: 0 12px 30px rgba(8,17,28,.05);
+  }
+  .chain small { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .chain .down { color: var(--accent); font-family: var(--mono); padding-left: 8px; }
+  .hyps { display: flex; gap: 28px; margin-top: 10px; font-size: 22px; }
+  .hyps b { color: var(--accent); }
+  .chain .gapstep { background: var(--blue); color: #fff; border: 0; }
+  .chain .gapstep small { color: #c5d6ff; }
+  .versus { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 18px; }
+  .versus div { border-top: 2px solid var(--line2); padding-top: 12px; }
+  .versus small { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .versus b { display: block; margin-top: 6px; font-size: 22px; letter-spacing: -.03em; }
+  .versus .ours { border-top-color: var(--accent); }
+
+  .loopvis { margin-top: 22px; display: grid; grid-template-columns: 1fr 28px; gap: 8px 0; max-width: 640px; }
+  .loopvis .n {
+    grid-column: 1;
+    background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; font-size: 18px;
+  }
+  .loopvis .n b { font-family: var(--mono); font-size: 12px; color: var(--accent); letter-spacing: .08em; margin-right: 8px; }
+  .loopvis .back { grid-column: 2; grid-row: 1 / span 6; border-right: 2px solid var(--accent); border-top: 2px solid var(--accent); border-bottom: 2px solid var(--accent); border-radius: 0 16px 16px 0; margin: 18px 0 18px 8px; position: relative; }
+  .keep { margin-top: 16px; color: var(--muted); font-size: 18px; }
+
+  .split2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 22px; }
+  .predict { background: #fff; border: 1px solid var(--line); border-radius: 18px; padding: 18px 20px; }
+  .predict b { display: block; font-size: 20px; }
+  .predict span { display: block; margin-top: 6px; color: var(--muted); }
+  .formula-line { margin-top: 16px; font-family: var(--mono); font-size: 15px; color: var(--accent); }
+
+  .bridge { margin-top: 22px; display: grid; grid-template-columns: 1fr 28px 1fr; gap: 8px 0; align-items: center; }
+  .bridge .had, .bridge .ask { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; }
+  .bridge .had:empty { visibility: hidden; }
+  .bridge .ask { border-color: rgba(14,50,110,.28); }
+  .bridge .to { text-align: center; color: var(--accent); font-family: var(--mono); }
+  .five { margin-top: 18px; font-family: var(--mono); font-size: 13px; letter-spacing: .12em; text-transform: uppercase; color: var(--accent); }
+
+  .layers { display: flex; gap: 18px; margin-top: 12px; font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .layers i { display: inline-block; width: 22px; height: 3px; margin-right: 8px; vertical-align: middle; }
+  .layers .o i { background: var(--blue-lift); }
+  .layers .n i { background: var(--blue-deep); }
+  .node.origin { box-shadow: inset 0 3px 0 var(--blue-lift); }
+  .node.later { box-shadow: inset 0 3px 0 var(--blue-deep); }
+
+  .scope { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 24px; }
+  .scope article { border-radius: 22px; padding: 22px; border: 1px solid var(--line); background: #fff; }
+  .scope h3 { font-family: var(--mono); font-size: 12px; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  .scope li { margin-top: 12px; font-size: 18px; line-height: 1.35; list-style: none; }
+  .blank { display: flex; justify-content: space-between; gap: 12px; border-bottom: 1px dashed var(--line2); padding: 8px 0; }
+  .blank em { font-style: normal; font-family: var(--mono); color: var(--muted); }
+  .tiers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-top: 18px; }
+  .tiers article { background: var(--blue); color: #fff; border-radius: 22px; padding: 22px; }
+  .tiers small { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: #c5d6ff; }
+  .tiers b { display: block; margin-top: 10px; font-size: clamp(28px, 3vw, 40px); letter-spacing: -.04em; }
+  .src .who, .src .id { font-size: 11px; font-weight: 650; color: var(--muted); }
+  .metric .num, .stat, .hyps b, .tiers b, table td.n, table th.n { font-variant-numeric: tabular-nums; }
+  .metric .num { font-size: clamp(52px, 5.2vw, 76px); }
+  header.hero {
+    background:
+      radial-gradient(720px 380px at 18% 0%, rgba(90, 150, 255, .22), transparent 58%),
+      linear-gradient(180deg, #071833, #0c2a5c 70%);
+  }
+  .rule { height: 1px; background: var(--line2); margin: 22px 0 18px; }
+  .nums3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .probs { display: grid; gap: 12px; margin-top: 8px; }
+  .probs article { display: grid; grid-template-columns: 42px 1fr; gap: 8px 14px; align-items: start; }
+  .probs .idx { font-family: var(--mono); font-size: 20px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  .probs b { display: block; font-size: 18px; }
+  .probs span { display: block; margin-top: 3px; color: var(--muted); font-size: 16px; line-height: 1.4; }
+  .askline { margin: 18px 0 4px; max-width: 24em; font-size: clamp(20px, 2vw, 26px); font-weight: 700; letter-spacing: -.03em; line-height: 1.25; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .maptbl { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  .maptbl td { padding: 11px 16px 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 17px; }
+  .maptbl td:first-child { width: 200px; font-family: var(--mono); color: var(--accent); font-size: 14px; }
+  .sust4 { grid-template-columns: repeat(4, 1fr); }
+  .rates { display: grid; grid-template-columns: 1.2fr repeat(3, 1fr); gap: 0; margin-top: 14px; font-family: var(--mono); font-size: 14px; }
+  .rates div { padding: 8px 10px; border-bottom: 1px solid var(--line); }
+  .rates .h { color: var(--muted); letter-spacing: .08em; text-transform: uppercase; font-size: 11px; }
+  .dark {
+    background:
+      radial-gradient(520px 280px at 50% 0%, rgba(90, 150, 255, .22), transparent 60%),
+      linear-gradient(165deg, var(--blue-deep), var(--blue) 62%, #12367a);
+    color: #fff;
+  }
+  .dark .closer, .dark h2, .dark .thanks { color: #fff; }
+  .thanks { margin-top: 36px; font-size: clamp(32px, 4vw, 48px); font-weight: 650; letter-spacing: -.04em; }
+  .gh { display: inline-block; margin-top: 18px; font-family: var(--mono); font-size: 15px; color: #d5e2ff; border-bottom: 1px solid rgba(213,226,255,.45); }
+  .fine { margin-top: 14px; color: var(--muted); font-size: 16px; max-width: 46em; line-height: 1.45; }
+  .future { margin-top: 22px; grid-template-columns: repeat(6, 1fr); }
+  .future .card { grid-column: span 2; padding: 18px 22px 16px; }
+  .future .card:nth-child(4),
+  .future .card:nth-child(5) { grid-column: span 3; }
+  .future .n { font-family: var(--mono); font-size: 13px; letter-spacing: .14em; color: var(--accent); font-weight: 500; }
+  .future h3 { margin-top: 8px; font-size: clamp(18px, 1.7vw, 22px); letter-spacing: .04em; text-transform: uppercase; line-height: 1.2; }
+  .future .claim { margin-top: 8px; font-size: 16px; }
+  .dora-pill {
+    display: inline-block; margin-top: 26px;
+    background: var(--accent); color: #fff;
+    font-family: var(--mono); font-size: 11px; letter-spacing: .14em;
+    text-transform: uppercase; border-radius: 999px; padding: 8px 14px;
+  }
+  .dora-box {
+    margin-top: 16px; border: 1px solid var(--line); border-radius: 28px;
+    box-shadow: 0 18px 50px rgba(8, 17, 28, .06);
+    display: grid; grid-template-columns: repeat(4, 1fr);
+  }
+  .dora-box article { padding: 28px 22px 26px; }
+  .dora-box article + article { border-left: 1px solid var(--line); }
+  .dora-box .stat { margin-top: 12px; font-size: clamp(32px, 3.2vw, 46px); }
+  .dora-box .claim { margin-top: 12px; font-size: 15px; color: var(--muted); }
+
+  @media (max-width: 980px) {
+    .papers, .three, .sust, .roi, .cols6, .stage, .versus, .split2, .bridge, .scope, .tiers, .nums3, .pair, .sust4 { grid-template-columns: 1fr; }
+    .dora-box { grid-template-columns: 1fr 1fr; }
+    .dora-box article:nth-child(odd) { border-left: 0; }
+    .dora-box article:nth-child(n + 3) { border-top: 1px solid var(--line); }
+    .bridge .to, .loopvis .back { display: none; }
+    .cols6 { grid-template-columns: 1fr 1fr; }
+    .flow, .flow.after { grid-template-columns: 1fr; gap: 10px; }
+    .edge { display: none; }
+    ol.tl li { grid-template-columns: 64px 1fr; }
+    ol.tl .d { grid-column: 2; }
+  }
+  @media (max-width: 720px) {
+    .nav-links { display: none; }
+    .stage-copy { padding: 32px 22px; }
+    .team, .grid4, .terms, .cols6, .bench, .dora-box { grid-template-columns: 1fr; }
+    .dora-box article + article { border-left: 0; border-top: 1px solid var(--line); }
+    .formula code { white-space: normal; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    .reveal { opacity: 1; transform: none; transition: none; }
+    .rise, .play { animation: none; }
+    .card, .node, .roi section { transition: none; }
+  }
+</style>
+</head>
+<body>
+<div id="progress"></div>
+<nav>
+  <a class="brand" href="#top">Incident Commander</a>
+  <div class="nav-links">
+    <a href="#gap">Problem</a>
+    <a href="#loop">Built</a>
+    <a href="#bridge">Phase 2</a>
+    <a href="#thesis">Answer</a>
+    <a href="#demo">Demo</a>
+    <a href="#proof">Evidence</a>
+    <a href="#dora">DORA</a>
+    <a href="#worth">Worth</a>
+    <a href="#future">Next</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="stage rise">
+    <div class="stage-copy">
+      <p class="kicker">DevOpsDays Cairo 2026 · Track 1</p>
+      <h1>Incident<br>Commander</h1>
+      <p class="tagline">Evidence decides how much autonomy an AI agent gets.</p>
+      <p class="ask">What should we investigate next?</p>
+    </div>
+    <div class="stage-people">
+      <div class="team">
+        <figure>
+          <div class="avatar"><img src="assets/nourseen.png" alt="Nourseen Tarek" /></div>
+          <figcaption>
+            <strong>Nourseen Tarek</strong>
+            <span>Senior year student</span>
+            <span class="uni">Alryada University</span>
+            <span class="major">Cyber Security</span>
+            <span>Former observability intern, Ejada</span>
+          </figcaption>
+        </figure>
+        <figure>
+          <div class="avatar"><img src="assets/shahesta.png" alt="Shahesta Salama" /></div>
+          <figcaption>
+            <strong>Shahesta Salama</strong>
+            <span>Senior year student</span>
+            <span class="uni">Alryada University</span>
+            <span class="major">Artificial Intelligence</span>
+            <span>Big Data intern, Samsung Innovation Campus</span>
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</header>
+
+<section id="gap" class="phase">
+  <div class="wrap">
+    <p class="kicker reveal">Phase 1 · The problem</p>
+    <h2 class="reveal">Finding the cause is not enough.<br>The real challenge is deciding what to investigate next.</h2>
+    <div class="chain reveal">
+      <div class="step"><small>Production incident</small></div>
+      <div class="down">↓</div>
+      <div class="step">
+        <small>Multiple plausible root causes</small>
+        <p class="reading">First-screen evidence still fits more than one story.</p>
+        <div class="hyps"><span>H1 <b>48%</b></span><span>H2 <b>41%</b></span></div>
+      </div>
+      <div class="down">↓</div>
+      <div class="step gapstep"><small>The gap</small><p>What should we investigate next?</p></div>
+    </div>
+    <div class="rule"></div>
+    <div class="nums3">
+      <article class="card metric reveal"><p class="num">13.8%</p><p class="line">of SRE scenarios resolved autonomously.</p><footer class="src"><span class="who">IBM · ITBench</span><span class="id">Peer-reviewed, PMLR · arxiv.org/abs/2502.05352</span></footer></article>
+      <article class="card metric reveal"><p class="num">63.7% → 17.9%</p><p class="line">Accuracy collapse on failures never seen before.</p><footer class="src"><span class="who">SREGym · July 2026</span><span class="id">arXiv:2605.07161</span></footer></article>
+      <article class="card metric reveal"><p class="num">73%</p><p class="line">Accuracy reached in about 10 steps, by exhaustive re-checking, not by choosing well.</p><footer class="src"><span class="who">Cloud-OpsBench · February 2026</span><span class="id">arXiv:2603.00468</span></footer></article>
+    </div>
+    <p class="fine reveal">Systems emphasise the quality of the final diagnosis. We focused on the quality of the path that leads to it.</p>
+  </div>
+</section>
+
+<section id="loop">
+  <div class="wrap">
+    <p class="kicker reveal">Phase 1 · What we built</p>
+    <h2 class="reveal">An investigation loop — not a single answer.</h2>
+    <div class="split2">
+      <div class="loopvis reveal">
+        <div class="n"><b>01</b>Incident</div>
+        <div class="n"><b>02</b>Competing hypotheses</div>
+        <div class="n"><b>03</b>Current beliefs</div>
+        <div class="n"><b>04</b>Candidate checks, scored</div>
+        <div class="n"><b>05</b>Run the most informative one</div>
+        <div class="n"><b>06</b>New evidence → beliefs update</div>
+        <div class="back" aria-hidden="true"></div>
+      </div>
+      <div>
+        <div class="split2" style="margin-top:0">
+          <div class="predict reveal"><b>H1</b><span>predicts connection_wait rises first</span></div>
+          <div class="predict reveal"><b>H2</b><span>predicts connection_wait rises later</span></div>
+        </div>
+        <p class="keep reveal">They disagree → this check separates them. Skip the ones both hypotheses would survive.</p>
+        <p class="formula-line reveal">Next check = argmax( expected information gain ÷ cost )</p>
+      </div>
+    </div>
+    <p class="fine reveal">Continue while uncertainty remains and a discriminating check exists.</p>
+  </div>
+</section>
+
+<section id="measure">
+  <div class="wrap">
+    <p class="kicker reveal">Phase 1 · How we proved it</p>
+    <h2 class="reveal">We proved the policy the only honest way: we turned it off.</h2>
+    <p class="block-label">12 recorded incidents · 24 runs · checks on vs off</p>
+    <div class="bench reveal">
+      <div class="h"></div><div class="h on">On</div><div class="h">Off</div>
+      <div>Accuracy on the hardest cases</div><div class="on">100%</div><div>0%</div>
+      <div>False-positive rollbacks</div><div class="on">0%</div><div>33%</div>
+    </div>
+    <p class="fine reveal">Why off scores 0% and not 50%: the discriminating signal is reachable only through a check. Turn checks off and it is genuinely gone — so the ablation measures the policy, not the model.</p>
+  </div>
+</section>
+
+<section id="bridge" class="phase">
+  <div class="wrap">
+    <p class="kicker reveal">Phase 2 · The problem</p>
+    <h2 class="reveal">A conclusion is not the end.<br>Acting on it raises a different class of problem.</h2>
+    <div class="probs reveal">
+      <article><div class="idx">01</div><div><b>Safety</b><span>A wrong diagnosis cost a wasted investigation. A wrong action costs a second outage.</span></div></article>
+      <article><div class="idx">02</div><div><b>Blast radius</b><span>Rolling back a release is recoverable. Failing over a shared database is not. Nothing in a confidence score tells the agent which is which.</span></div></article>
+      <article><div class="idx">03</div><div><b>Verification</b><span>“The fix ran” is not “the fix worked”. Without a check, a failed remediation looks like success.</span></div></article>
+      <article><div class="idx">04</div><div><b>Explainability</b><span>Afterwards, who proves what the agent was permitted to do? Logs can be edited by whoever owns them.</span></div></article>
+      <article><div class="idx">05</div><div><b>Autonomy</b><span>Approve everything and the value is gone. Approve nothing and it is reckless. Where is the line?</span></div></article>
+    </div>
+    <p class="askline reveal">Where do we draw the line between a decision the system can make and an action that needs clear conditions?</p>
+    <div class="rule"></div>
+    <div class="pair">
+      <article class="card reveal"><p class="line">Config and deploy changes are the single largest source of outages. The actions we would be automating are the risky ones.</p><footer class="src"><span class="who">Meta Engineering · August 2026</span><span class="id">Largest category · arXiv:2608.20513</span></footer></article>
+      <article class="card reveal"><p class="line">Uniform governance across AI agents will lead to enterprise AI agent failure.</p><footer class="src"><span class="who">Gartner · May 2026</span><span class="id">Governance gaps</span></footer></article>
+    </div>
+  </div>
+</section>
+
+<section id="thesis">
+  <div class="wrap">
+    <p class="kicker reveal">Phase 2 · Our answer</p>
+    <h2 class="reveal">Five problems. One rule, and five mechanisms.</h2>
+    <div class="three">
+      <div class="pillar reveal"><div class="word">Stop</div><div class="when">when unsure</div></div>
+      <div class="pillar reveal"><div class="word">Prove</div><div class="when">it was allowed</div></div>
+      <div class="pillar reveal"><div class="word">Undo</div><div class="when">when wrong</div></div>
+    </div>
+    <p class="keep reveal">Notice what is not on this list: confidence.</p>
+    <p class="sentence reveal">A system that acts because it is confident is exactly the system that causes the second outage.</p>
+    <table class="maptbl reveal">
+      <tbody>
+        <tr><td>01 Safety</td><td>Abstain when evidence cannot separate causes. Refusing is a designed output.</td></tr>
+        <tr><td>02 Blast radius</td><td>Actions classified by reversibility and reach. Irreversible ones are forbidden.</td></tr>
+        <tr><td>03 Verification</td><td>Recovery judged only from telemetry collected after the action.</td></tr>
+        <tr><td>04 Explainability</td><td>Every decision sealed. Merkle + Ed25519, verifiable offline by a third party.</td></tr>
+        <tr><td>05 Autonomy</td><td>The line is reversibility, not confidence.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section id="architecture">
+  <div class="wrap">
+    <p class="kicker reveal">Architecture</p>
+    <h2 class="reveal">Six layers. The one that decides is not the one that acts.</h2>
+    <div class="flow reveal">
+      <div class="node"><small>Live</small><b>Service</b></div>
+      <div class="edge">OTLP</div>
+      <div class="node"><small>01 · Observability</small><b>Telemetry</b></div>
+      <div class="edge arr"></div>
+      <div class="node"><small>02 · SRE</small><b>Detection</b></div>
+      <div class="edge arr"></div>
+      <div class="node origin"><small>03 · Decision theory</small><b>Investigation</b></div>
+    </div>
+    <div class="gate reveal">
+      <div>
+        <small>04 · Policy-as-code</small>
+        <b>Policy · OPA</b>
+        <em>Outside the agent. The agent cannot widen its own permissions.</em>
+      </div>
+      <div class="stamp">ALLOW</div>
+    </div>
+    <div class="flow after reveal">
+      <div class="node"><small>Only after allow</small><b>Execute</b><em>On the service</em></div>
+      <div class="edge arr"></div>
+      <div class="node later"><small>05 · Control loop</small><b>Verification</b><em>Fresh telemetry. Not recovered → auto-revert.</em></div>
+      <div class="edge arr"></div>
+      <div class="node later"><small>06 · Cryptography</small><b>Audit</b><em>Decision, evidence and action</em><em>Merkle tree · Ed25519 · offline verifier</em></div>
+    </div>
+    <div class="layers reveal"><span class="o"><i></i>The loop we already had</span><span class="n"><i></i>What acting required</span></div>
+    <div class="ticks reveal">
+      <span><b>10</b> engine modules</span><span><b>15</b> unit tests</span><span><b>14</b> policy tests</span>
+      <span><b>63</b> live trials</span><span><b>24</b> benchmark runs</span><span><b>3</b> strategies</span>
+    </div>
+    <div class="callout reveal">
+      <div class="flag">Found in our own system</div>
+      <p style="margin-top:8px">A transient latency blip vetoed a correct diagnosis. We fixed it and re-ran <strong>19 trials</strong>. The fix fired in <strong>4 of 10</strong> runs.</p>
+    </div>
+  </div>
+</section>
+
+<section class="demo" id="demo">
+  <div class="wrap">
+    <div class="play" aria-hidden="true"><svg width="26" height="30" viewBox="0 0 28 32" fill="none"><path d="M2 2.5v27l24-13.5L2 2.5z" fill="#ffffff"/></svg></div>
+    <h2 class="reveal">Live demo</h2>
+    <p class="sub reveal">We’ll break the service now and watch it recover.</p>
+    <p class="quiet reveal">No clicks. No approvals. The system decides.</p>
+    <p class="path reveal">detect → investigate → policy → act → verify → seal</p>
+  </div>
+</section>
+
+<section id="proof">
+  <div class="wrap">
+    <p class="kicker reveal">Evidence</p>
+    <h2 class="reveal">One demo proves nothing. We ran 63 trials.</h2>
+    <div class="incident reveal"><b>LIVE-0073</b><span>Resolved in 17.6 s · beliefs 0.25 → 0.99 · 15 leaves sealed</span></div>
+    <table class="data reveal">
+      <thead><tr><th>Outcome</th><th class="n">Trials</th></tr></thead>
+      <tbody>
+        <tr><td>Confirmed → acted → verified recovered</td><td class="n">10 / 10 <span class="check">✓</span></td></tr>
+        <tr><td>Acted on exclusion → verification caught it → reverted</td><td class="n">5 / 5 <span class="check">✓</span></td></tr>
+        <tr><td>Evidence insufficient → abstained, no action</td><td class="n">5 / 5 <span class="check">✓</span></td></tr>
+        <tr><td>Irreversible action proposed → policy denied</td><td class="n">5 / 5 <span class="check">✓</span></td></tr>
+      </tbody>
+    </table>
+    <table class="data reveal">
+      <thead><tr><th></th><th class="n ours">Ours</th><th class="n">Exhaustive</th><th class="n">No investigation</th></tr></thead>
+      <tbody>
+        <tr><td>Resolved, reversible fault</td><td class="n ours">80%</td><td class="n">100%</td><td class="n">0%</td></tr>
+        <tr><td>Harmful actions</td><td class="n ours">0</td><td class="n">0</td><td class="n">0</td></tr>
+        <tr><td>Unreverted changes</td><td class="n ours">0</td><td class="n">0</td><td class="n">0</td></tr>
+        <tr><td>Probes per incident</td><td class="n ours">2.25</td><td class="n">2.75</td><td class="n">0</td></tr>
+        <tr><td>Canary traffic exposure</td><td class="n ours">40 %·s</td><td class="n">120 %·s</td><td class="n">0</td></tr>
+      </tbody>
+    </table>
+    <p class="fine reveal">Comparison ran before the noise fix. The 10 / 10 above is the current code. Not tested: a real production environment, more than four failure shapes, a measured human baseline.</p>
+  </div>
+</section>
+
+<section id="dora">
+  <div class="wrap">
+    <p class="kicker reveal">In DORA terms</p>
+    <h2 class="reveal">Enterprise-grade metrics, delivered.</h2>
+    <p class="dora-pill reveal">DORA · Four key metrics</p>
+    <div class="dora-box">
+      <article class="reveal">
+        <p class="eyebrow">MTTR</p>
+        <p class="stat">≈ 30 s</p>
+        <p class="claim">Mean Time to Restore. Elite tier is under 1 hour. From SLO breach to verified recovery, sealed.</p>
+      </article>
+      <article class="reveal">
+        <p class="eyebrow">Change failure rate</p>
+        <p class="stat">33% → 0%</p>
+        <p class="claim">False-positive rollbacks eliminated. Verification + auto-revert catch what a confidence score cannot.</p>
+      </article>
+      <article class="reveal">
+        <p class="eyebrow">Failed-deploy blast</p>
+        <p class="stat">0</p>
+        <p class="claim">Unreverted changes across 63 live trials. Failed deploys self-heal instead of escalating.</p>
+      </article>
+      <article class="reveal">
+        <p class="eyebrow">Deploy freq / lead time</p>
+        <p class="stat">Unblocked</p>
+        <p class="claim">Offline-verifiable audit chain removes the manual post-mortem gate on faster deploys.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="audit">
+  <div class="wrap">
+    <p class="kicker reveal">Audit</p>
+    <h2 class="reveal">Every decision is sealed. Change one, and the chain says so.</h2>
+    <div class="terms">
+      <div class="term reveal">
+        <div>$ python verify.py LIVE-0073.postmortem.json</div>
+        <div>incident &nbsp; LIVE-0073<br>leaves &nbsp;&nbsp;&nbsp; 15<br>signature &nbsp; OK</div>
+        <div class="ok">VERIFIED · exit 0</div>
+      </div>
+      <div class="term reveal">
+        <div>$ python verify.py LIVE-0073.tampered.json</div>
+        <div>TAMPERED leaf<br>opa://…/02-rollback_deploy<br>ALLOW → DENY</div>
+        <div class="bad">TAMPERED · exit 1</div>
+      </div>
+    </div>
+    <p class="fine reveal">Not logging. Evidence a third party can verify offline — without trusting us.</p>
+  </div>
+</section>
+
+<section id="worth">
+  <div class="wrap">
+    <p class="kicker reveal">Worth</p>
+    <h2 class="reveal">What this is worth depends on what one wrong action costs you.</h2>
+    <div class="scope">
+      <article class="reveal">
+        <h3>Measured by us · 63 live trials</h3>
+        <ul>
+          <li>Wrong actions caught and reverted, 5 / 5.</li>
+          <li>Wrong rollbacks, 33% → 0%.</li>
+          <li>Harmful actions, 0 / 63.</li>
+          <li>Every decision provable, 100%.</li>
+        </ul>
+      </article>
+      <article class="reveal">
+        <h3>Supplied by you</h3>
+        <div class="blank"><span>Incidents per month</span><em>____</em></div>
+        <div class="blank"><span>Revenue per minute</span><em>____</em></div>
+        <div class="blank"><span>Minutes the outage was extended</span><em>____</em></div>
+      </article>
+    </div>
+    <div class="rates reveal">
+      <div class="h"></div><div class="h">Internal tool</div><div class="h">Customer-facing</div><div class="h">Revenue path</div>
+      <div>Incidents / month</div><div>10</div><div>40</div><div>200</div>
+      <div>One wrong action</div><div>$300</div><div>$600</div><div>$50,000</div>
+      <div>Value / year</div><div>$14,442</div><div>$108,208</div><div>$40,077,319</div>
+    </div>
+    <p class="fine reveal">Before any of this: without a provable record of what the agent was allowed to do, the answer to “can we let it act” stays no.</p>
+  </div>
+</section>
+
+<section id="sustain">
+  <div class="wrap">
+    <p class="kicker reveal">Sustainability</p>
+    <h2 class="reveal">We sustain the system by avoiding unnecessary work.</h2>
+    <div class="sust">
+      <article class="card reveal">
+        <p class="eyebrow">Cost &amp; environment</p>
+        <p class="stat">9 / 24</p>
+        <p class="claim">checks avoided. Less unnecessary telemetry and query work.</p>
+      </article>
+      <article class="card reveal">
+        <p class="eyebrow">Security &amp; reliability</p>
+        <p class="stat">5 / 5</p>
+        <p class="claim">wrong actions reverted. Verification limits the cost of a wrong decision.</p>
+      </article>
+      <article class="card reveal">
+        <p class="eyebrow">People &amp; governance</p>
+        <p class="stat" style="font-size:clamp(28px,3vw,40px)">Policy + evidence chain</p>
+        <p class="claim">Actions require authorization and remain independently verifiable.</p>
+      </article>
+    </div>
+    <p class="fine reveal">Sustainability is disciplined use of compute, infrastructure, operational risk, and human attention.</p>
+  </div>
+</section>
+
+<section id="future">
+  <div class="wrap">
+    <p class="kicker reveal">Future work</p>
+    <h2 class="reveal">From Proof-of-Concept to Real-World Evidence.</h2>
+    <div class="grid4 future">
+      <article class="card reveal">
+        <p class="n">01</p>
+        <h3>Test outside our lab</h3>
+        <p class="claim">Evaluate Incident Commander on real incident workflows using existing observability infrastructure.</p>
+      </article>
+      <article class="card reveal">
+        <p class="n">02</p>
+        <h3>Run in the shadow</h3>
+        <p class="claim">Observe real incidents without taking control. Compare our decisions with what SRE teams actually did.</p>
+      </article>
+      <article class="card reveal">
+        <p class="n">03</p>
+        <h3>Earn the right to act</h3>
+        <p class="claim">Progress from human-approved actions to bounded autonomy, limited by reversibility, scope, and policy.</p>
+      </article>
+      <article class="card reveal">
+        <p class="n">04</p>
+        <h3>Learn from operations</h3>
+        <p class="claim">Learn from human interventions, verified operational outcomes, evidence selection, and the autonomy policy.</p>
+      </article>
+      <article class="card reveal">
+        <p class="n">05</p>
+        <h3>Prove the value</h3>
+        <p class="claim">Measure real-world impact: investigation effort, unnecessary actions, recovery cost, and ultimately ROI.</p>
+      </article>
+    </div>
+    <div class="banner reveal">
+      <b>Bottom line</b>
+      <span>First prove it works. Then prove it generalizes. Then prove it is safe to use. Finally, prove it is worth paying for.</span>
+    </div>
+  </div>
+</section>
+
+<script>
+  const reveals = [...document.querySelectorAll(".reveal")];
+  reveals.forEach((el) => {
+    const sibs = [...el.parentElement.children].filter((c) => c.classList.contains("reveal"));
+    el.style.transitionDelay = (sibs.indexOf(el) * 80) + "ms";
+  });
+
+  const links = [...document.querySelectorAll(".nav-links a")];
+  const sections = links.map((a) => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+  const bar = document.getElementById("progress");
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function paint() {
+    const vh = innerHeight;
+    const line = vh * 0.86;
+    reveals.forEach((el) => {
+      if (el.classList.contains("in")) return;
+      const r = el.getBoundingClientRect();
+      if (reduce || (r.top < line && r.bottom > 0)) el.classList.add("in");
+    });
+    let current = sections[0];
+    sections.forEach((s) => { if (s.getBoundingClientRect().top <= vh * 0.38) current = s; });
+    if (current) links.forEach((a) => a.classList.toggle("on", a.getAttribute("href") === "#" + current.id));
+    const h = document.documentElement;
+    const max = h.scrollHeight - h.clientHeight;
+    bar.style.width = (max > 0 ? (h.scrollTop / max) * 100 : 0) + "%";
+  }
+
+  let lastY = -1;
+  function frame() {
+    if (scrollY !== lastY) { lastY = scrollY; paint(); }
+    requestAnimationFrame(frame);
+  }
+  paint();
+  requestAnimationFrame(frame);
+  addEventListener("resize", paint);
+  document.querySelectorAll("header.hero, section[id]").forEach((el) => {
+    el.addEventListener("scroll", paint, { passive: true });
+  });
+</script>
+</body>
+</html>

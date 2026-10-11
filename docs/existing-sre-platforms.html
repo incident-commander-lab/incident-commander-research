@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Existing Autonomous SRE Platforms and Their Autonomy Models</title>
+<style>
+  :root {
+    --navy: #0c2340;
+    --ink: #1c2733;
+    --muted: #5c6976;
+    --line: #e3ddd4;
+    --line-strong: #cfc6b8;
+    --wash: #f6f4ef;
+    --teal: #0e6e6e;
+    --teal-soft: #e8f3f2;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    color: var(--ink);
+    font-family: "Segoe UI", Calibri, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.46;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  @page {
+    size: A4 portrait;
+    margin: 16mm 14mm 14mm 14mm;
+    @top-left {
+      content: "INCIDENT COMMANDER";
+      font-family: "Segoe UI", sans-serif;
+      font-size: 7.5pt;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      color: #0c2340;
+    }
+    @top-right {
+      content: "PHASE 3  ·  RESEARCH DIRECTION";
+      font-family: "Segoe UI", sans-serif;
+      font-size: 7.5pt;
+      letter-spacing: 0.08em;
+      color: #5c6976;
+    }
+    @bottom-left {
+      content: "Existing autonomous SRE platforms and their autonomy models";
+      font-family: "Segoe UI", sans-serif;
+      font-size: 8pt;
+      color: #8b938c;
+    }
+    @bottom-right {
+      content: counter(page);
+      font-family: "Segoe UI", sans-serif;
+      font-size: 9pt;
+      font-weight: 700;
+      color: #0c2340;
+    }
+  }
+  h1 {
+    margin: 0 0 0.35em;
+    font-size: 18pt;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--navy);
+    font-weight: 650;
+  }
+  .kicker {
+    margin: 0 0 2.5mm;
+    font-size: 8pt;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--teal);
+    font-weight: 700;
+  }
+  p { margin: 0 0 0.55em; }
+  h2 {
+    margin: 1em 0 0.35em;
+    font-size: 13pt;
+    color: var(--navy);
+    font-weight: 650;
+    break-after: avoid;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 3mm 0 4mm;
+    font-size: 8.4pt;
+    line-height: 1.35;
+  }
+  th {
+    text-align: left;
+    font-size: 7.2pt;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--navy);
+    background: var(--wash);
+    border-bottom: 1pt solid var(--navy);
+    padding: 2mm 2.2mm;
+    vertical-align: bottom;
+  }
+  td {
+    padding: 2.4mm 2.2mm;
+    border-bottom: 0.4pt solid var(--line);
+    vertical-align: top;
+  }
+  td.plat { font-weight: 700; color: var(--navy); width: 20%; }
+  blockquote {
+    margin: 0.55em 0 0.7em;
+    padding: 3mm 4mm;
+    border-left: 2.4pt solid var(--teal);
+    background: var(--teal-soft);
+    break-inside: avoid;
+  }
+  blockquote p {
+    margin: 0;
+    font-family: Georgia, "Palatino Linotype", serif;
+    font-size: 11pt;
+    line-height: 1.4;
+    color: var(--navy);
+  }
+  ul { margin: 0.2em 0 0.6em; padding-left: 1.15em; }
+  li { margin: 0.15em 0; }
+  li strong { color: var(--navy); }
+  .keep { break-inside: avoid; page-break-inside: avoid; }
+  .rule {
+    margin-top: 5mm;
+    border-top: 0.6pt solid var(--line-strong);
+    padding-top: 2.2mm;
+    font-size: 8pt;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<p class="kicker">Phase 3 · Research direction</p>
+<h1>Existing Autonomous SRE Platforms and Their Autonomy Models</h1>
+
+<p>Current commercial platforms demonstrate that autonomous incident response is already moving into production. Therefore, the Phase 3 research opportunity should not be framed simply as enabling autonomous remediation. Instead, existing mechanisms for controlling autonomy should be examined to identify remaining gaps.</p>
+
+<table>
+  <thead>
+    <tr>
+      <th>Platform</th>
+      <th>Autonomous capabilities</th>
+      <th>How autonomy is controlled</th>
+      <th>Main limitation / open question</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="plat">Microsoft Azure SRE Agent</td>
+      <td>Incident investigation, troubleshooting, mitigation, and autonomous execution</td>
+      <td>Review vs. Autonomous modes, response plans, permissions, and task/incident configuration</td>
+      <td>Autonomy is primarily configured by humans rather than dynamically adapted from verified operational outcomes</td>
+    </tr>
+    <tr>
+      <td class="plat">AWS DevOps Agent</td>
+      <td>Autonomous investigation, root-cause analysis, and remediation workflows</td>
+      <td>IAM permissions, permission boundaries, approval actions, and controlled remediation workflows</td>
+      <td>Strong permission controls exist, but the autonomy boundary is primarily policy/configuration-driven</td>
+    </tr>
+    <tr>
+      <td class="plat">Datadog Bits</td>
+      <td>Investigation and remediation such as scaling deployments, restarting pods, and modifying resources</td>
+      <td>Ask/Deny guardrails based on action, environment, service, and resource</td>
+      <td>Guardrails define what the agent may execute, but publicly documented behavior does not show an outcome-driven mechanism for automatically expanding or reducing authority</td>
+    </tr>
+    <tr>
+      <td class="plat">Dynatrace Intelligence</td>
+      <td>Investigation, causal analysis, and execution of approved remediation workflows</td>
+      <td>Policies, permissions, and approved runbooks/actions</td>
+      <td>Autonomy is bounded through predefined policies and workflows rather than an explicitly outcome-driven autonomy mechanism</td>
+    </tr>
+    <tr>
+      <td class="plat">PagerDuty / Agentic Incident Response</td>
+      <td>Automated investigation and incident-response workflows</td>
+      <td>Workflow configuration, governance, and approval mechanisms</td>
+      <td>Supports increasing automation, but adaptive authority based on accumulated operational evidence is not the central mechanism</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Key observation</h2>
+<p>Existing platforms show that the industry has moved beyond a simple “AI recommends, human executes” model. Autonomous execution is already available in several commercial systems.</p>
+<p>However, the dominant control pattern is:</p>
+<blockquote>
+  <p>Human defines the boundary → agent operates within the boundary.</p>
+</blockquote>
+<p>A potential alternative is:</p>
+<blockquote>
+  <p>Agent operates within hard safety boundaries → outcomes are verified → operational reliability is measured → autonomy is adjusted within those boundaries.</p>
+</blockquote>
+<p>This motivates the Phase 3 research direction.</p>
+
+<div class="keep">
+<h2>Proposed research opportunity</h2>
+<p>The proposed research question is:</p>
+<blockquote>
+  <p>Can an SRE agent dynamically adapt its operational authority per action or incident based on verified operational outcomes, while remaining within hard policy and safety constraints?</p>
+</blockquote>
+</div>
+<p>A broader version is:</p>
+<blockquote>
+  <p>Can reliability, risk, reversibility, and cost jointly determine the appropriate autonomy level of an SRE agent?</p>
+</blockquote>
+<p>This would extend Incident Commander from:</p>
+<ul>
+  <li><strong>Phase 1:</strong> What evidence should the agent collect next?</li>
+  <li><strong>Phase 2:</strong> Does the agent have enough evidence and authorization to act?</li>
+  <li><strong>Phase 3:</strong> How much authority should the agent have for this type of action or incident?</li>
+</ul>
+<p>The objective is not to maximize autonomy, but to:</p>
+<blockquote>
+  <p>Increase autonomous coverage without increasing harmful actions or allowing operational cost to become uncontrolled.</p>
+</blockquote>
+
+<p class="rule">Incident Commander · Phase 3 research direction · 9 October 2026</p>
+</body>
+</html>

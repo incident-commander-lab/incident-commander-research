@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Incident Commander — Technical Presentation</title>
+  <style>
+    :root {
+      --bg:#07141b; --panel:#0e2430; --card:#132d3c; --line:#1f4a5c;
+      --text:#eef5f8; --muted:#8eacb8; --hi:#049fd9; --hi2:#00739d;
+      --ok:#27ae60; --warn:#e67e22; --bad:#e74c3c; --gold:#d4a017;
+      --ui:#f4f6f9; --uit:#1c2833; --uim:#566573; --uib:#e1e6eb;
+      --font:"Segoe UI",Inter,system-ui,sans-serif;
+      --mono:ui-monospace,"Cascadia Mono",Consolas,monospace;
+    }
+    *{box-sizing:border-box}
+    html,body{margin:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--font)}
+    body{overflow:hidden}
+    .slide{display:none;height:100%;padding:36px 48px 62px;flex-direction:column}
+    .slide.on{display:flex}
+    .k{color:var(--hi);font-size:11px;letter-spacing:.18em;text-transform:uppercase;font-weight:700;margin:0 0 6px}
+    h1{font-size:38px;line-height:1.1;margin:0 0 10px;letter-spacing:-.03em}
+    h2{font-size:26px;line-height:1.15;margin:0 0 14px;letter-spacing:-.02em}
+    .sub{color:var(--muted);font-size:18px;max-width:920px;margin:0}
+    .q{margin:12px 0 0;padding:10px 14px;border-left:4px solid var(--hi);background:#0b1c24;font-size:16px}
+    .g2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+    .g4{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10px}
+    .g5{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+    .c{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+    .c h3{margin:0 0 8px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+    .c p,.c li{margin:0;font-size:14.5px;line-height:1.35}
+    .c ul{margin:0;padding-left:16px}
+    .fill{flex:1;min-height:0}
+    .pill{display:inline-flex;align-items:center;gap:6px;background:#0b1c24;border:1px solid var(--line);border-radius:6px;padding:7px 10px;font-size:13px;font-weight:600}
+    .pill.hi{border-color:var(--hi);color:var(--hi)}
+    .pill.g{border-color:var(--gold);color:var(--gold);background:#241c08}
+    .flow{display:flex;flex-wrap:wrap;align-items:center;gap:7px}
+    .ar{color:var(--muted)}
+    .tag{display:inline-block;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:2px 6px;border-radius:3px}
+    .ok{background:#143325;color:var(--ok)}
+    .mid{background:#3a3214;color:var(--gold)}
+    .no{background:#3a1c1c;color:#f1948a}
+    .hyp{border-left:4px solid var(--hi)}
+    .hyp.a{border-left-color:var(--warn)}
+    .hyp.b{border-left-color:var(--muted)}
+    .hyp.d{border-left-color:#7f8c8d}
+    .hyp.w{border-left-color:var(--ok)}
+    .hyp.x{border-left-color:var(--bad);opacity:.8}
+    table{width:100%;border-collapse:collapse;font-size:13.5px}
+    th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
+    th{color:var(--muted);font-size:11px;letter-spacing:.07em;text-transform:uppercase}
+    .mono{font-family:var(--mono);font-size:12px}
+    .foot{margin-top:auto;padding-top:10px;color:var(--muted);font-size:13px}
+    .bar{position:absolute;left:0;right:0;bottom:0;height:46px;display:flex;align-items:center;justify-content:space-between;padding:0 48px;border-top:1px solid var(--line);background:#050f14;color:var(--muted);font-size:12px}
+    .dots{display:flex;gap:4px}
+    .dot{width:7px;height:7px;border-radius:50%;background:#244554}
+    .dot.on{background:var(--hi)}
+    .notes{display:none;position:absolute;left:0;right:0;bottom:46px;max-height:32%;overflow:auto;background:#061016;border-top:1px solid var(--hi2);padding:10px 48px;font-size:13px;line-height:1.4;color:#cfe0e8}
+    body.notes-on .notes{display:block}
+    .notes b{color:var(--hi)}
+    .title{justify-content:center}
+    .brand{color:var(--hi);font-size:12px;letter-spacing:.2em;text-transform:uppercase;font-weight:700;margin-bottom:14px}
+    .chain{display:flex;align-items:stretch;gap:0;margin:8px 0}
+    .ch{flex:1;background:var(--card);border:1px solid var(--line);padding:10px;text-align:center;font-size:13px;font-weight:700}
+    .ch.on{border-color:var(--hi);color:var(--hi);background:#0d2a38}
+    .ch.inv{outline:2px solid var(--gold);z-index:1}
+    .chx{display:flex;align-items:center;color:var(--muted);padding:0 6px}
+    .ui{background:var(--ui);color:var(--uit);border-radius:8px;overflow:hidden;border:1px solid #cfd8de;font-size:11.5px;display:flex;min-height:0;flex:1}
+    .rail{width:44px;background:#00739d;display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:8px;color:#fff}
+    .rbtn{width:26px;height:26px;border-radius:4px;background:rgba(255,255,255,.15);font-size:9px;display:flex;align-items:center;justify-content:center;font-weight:700}
+    .rbtn.on{background:#004560}
+    .work{flex:1;display:flex;flex-direction:column;min-width:0}
+    .tb{height:32px;background:#fff;border-bottom:1px solid var(--uib);display:flex;align-items:center;padding:0 10px;font-weight:700;font-size:12px;gap:8px}
+    .tb span{color:#00739d;font-weight:400;font-size:11px}
+    .ctrl{padding:6px 10px;background:#fff;border-bottom:1px solid var(--uib);display:flex;gap:8px;align-items:center;font-size:11px}
+    .btn{background:#049fd9;color:#fff;border:0;border-radius:3px;padding:4px 10px;font-weight:700}
+    .ugrid{display:grid;grid-template-columns:1.2fr 1fr;grid-template-rows:1fr 1fr auto;gap:6px;padding:6px;flex:1;min-height:0}
+    .uc{background:#fff;border:1px solid var(--uib);border-radius:4px;padding:6px 8px;overflow:hidden}
+    .uc h4{margin:0 0 4px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:#85929e}
+    .hb{height:5px;background:var(--uib);border-radius:3px;overflow:hidden;margin:3px 0}
+    .hf{height:100%;background:#049fd9}
+    .hf.g{background:#27ae60}
+    .hf.r{background:#e74c3c}
+    .mtx td,.mtx th{text-align:center;font-size:12px}
+    .s{font-weight:700}
+    .s.y{color:var(--ok)} .s.n{color:var(--bad)} .s.z{color:var(--muted)}
+    .help{display:none;position:absolute;inset:0;background:rgba(0,0,0,.7);align-items:center;justify-content:center;z-index:9}
+    body.help-on .help{display:flex}
+    kbd{font-family:var(--mono);border:1px solid var(--line);padding:1px 5px;border-radius:3px;background:#0b1c24}
+    .ol{margin:0;padding-left:18px}
+    .ol li{margin:0 0 5px;font-size:14.5px}
+    @media print{
+      body{overflow:visible;background:#fff;color:#111}
+      .slide{display:flex!important;page-break-after:always;height:100vh;background:#fff;color:#111}
+      .bar,.help{display:none!important}
+      .c,.pill,.ch{background:#f4f6f9;border-color:#d5dde2;color:inherit}
+    }
+  </style>
+</head>
+<body>
+<div id="deck">
+
+<!-- 1 -->
+<section class="slide title on" data-t="Title">
+  <div class="brand">Incident Commander  ·  DevOps / SRE technical prototype</div>
+  <h1>AI-Assisted Next-Best Investigation<br>for DevOps Incidents</h1>
+  <p class="sub">Evidence-Guided Incident Investigation Under Uncertainty</p>
+  <div class="q">Helping incident responders decide what to investigate next when multiple plausible causes remain.</div>
+  <div class="g3" style="margin-top:22px;max-width:980px">
+    <div class="c"><h3>Not</h3><p>Another observability platform, or an autonomous RCA bot that replaces the engineer.</p></div>
+    <div class="c"><h3>Is</h3><p>A decision-support loop for the investigation step after telemetry is already on screen.</p></div>
+    <div class="c"><h3>Status</h3><p>Working E2E prototype on recorded incident cases. Claims match the repository.</p></div>
+  </div>
+  <div class="foot">Team / project name  ·  Vodafone DevOps &amp; AI evaluation  ·  Human remains decision owner</div>
+  <div class="notes"><b>Say:</b> One sentence value, then the three cards. Do not mention VoI, Merkle, or agents yet. <b>Judge:</b> This is a serious investigation aid, not a generic AI demo.</div>
+</section>
+
+<!-- 2 -->
+<section class="slide" data-t="The problem">
+  <div class="k">01 — The real DevOps problem</div>
+  <h2>The Problem Is Not Lack of Telemetry</h2>
+  <div class="g2 fill">
+    <div class="c">
+      <h3>Incident — checkout / payment path is slow and erroring</h3>
+      <p style="margin-bottom:10px">The observability stack has already fired. The engineer can already see:</p>
+      <table>
+        <tr><td class="mono">http_5xx / latency</td><td>Above threshold — this is the symptom</td></tr>
+        <tr><td class="mono">database latency</td><td>Increased — database looks guilty</td></tr>
+        <tr><td class="mono">CPU</td><td>Increased — app looks saturated</td></tr>
+        <tr><td class="mono">network / timeouts</td><td>Present — path looks guilty</td></tr>
+        <tr><td class="mono">deployment</td><td>Landed ~10 minutes ago — change looks guilty</td></tr>
+        <tr><td class="mono">downstream / sibling</td><td>Also erroring — dependency looks guilty</td></tr>
+      </table>
+    </div>
+    <div>
+      <div class="c hyp" style="margin-bottom:8px"><h3>H1 Database overload</h3><p>Pool exhaustion, lock storm, or storage saturation cascading into 5xx.</p></div>
+      <div class="c hyp a" style="margin-bottom:8px"><h3>H2 Faulty deployment</h3><p>The recent release or config change introduced the fault.</p></div>
+      <div class="c hyp b" style="margin-bottom:8px"><h3>H3 Network issue</h3><p>Timeouts and retries are the cause, not a symptom.</p></div>
+      <div class="c hyp d"><h3>H4 Downstream dependency</h3><p>An upstream/downstream neighbour failed first and cascaded.</p></div>
+    </div>
+  </div>
+  <div class="q">The engineer now has evidence, but still has to decide what to investigate next. All four stories still fit this first screen.</div>
+  <div class="notes"><b>Say:</b> Ask which they would chase. Deploy and DB are the usual first guesses — that is the trap. Four hyps illustrate the ops situation; our prototype typically carries two competing hyps per case. <b>Judge:</b> This is a familiar SEV-2, not “we have no monitoring.”</div>
+</section>
+
+<!-- 3 -->
+<section class="slide" data-t="Why it matters">
+  <div class="k">02 — Why this matters</div>
+  <h2>Why Investigation Efficiency Matters</h2>
+  <div class="chain">
+    <div class="ch">Detection</div><div class="chx">→</div>
+    <div class="ch inv">Investigation</div><div class="chx">→</div>
+    <div class="ch">Diagnosis</div><div class="chx">→</div>
+    <div class="ch">Decision</div><div class="chx">→</div>
+    <div class="ch">Mitigation</div><div class="chx">→</div>
+    <div class="ch">Recovery</div>
+  </div>
+  <div class="g2 fill">
+    <div class="c">
+      <h3>Where time actually goes</h3>
+      <p>Detection is often fast. Investigation is where responders jump between Grafana, logs, traces, deploy history, and runbooks, testing one explanation after another while the service is still failing.</p>
+      <p style="margin-top:10px">The expensive pattern is not “no data.” It is checking evidence that both remaining stories would survive — or locking onto the first plausible story (usually the recent deploy).</p>
+    </div>
+    <div class="c">
+      <h3>Operational consequences</h3>
+      <table>
+        <tr><th>Effect</th><th>Why it happens</th></tr>
+        <tr><td>Longer time to diagnosis</td><td>Low-value checks first; discriminating signal later</td></tr>
+        <tr><td>Cognitive overload</td><td>Context split across tools and tabs</td></tr>
+        <tr><td>Repeated investigation</td><td>Same dashboards revisited without a decision rule</td></tr>
+        <tr><td>Premature conclusion</td><td>Nearby deploy looks causal and gets rolled back</td></tr>
+        <tr><td>Wrong mitigation</td><td>Innocent change reverted; real cause still live</td></tr>
+      </table>
+    </div>
+  </div>
+  <p class="foot">We do not claim a measured MTTR percentage. We claim investigation under residual uncertainty is a real, costly step in the chain above.</p>
+  <div class="notes"><b>Say:</b> Point at INVESTIGATION in gold. Detection is not the bottleneck we are selling. <b>Judge:</b> Practical SRE cost without fake numbers.</div>
+</section>
+
+<!-- 4 -->
+<section class="slide" data-t="Existing tools">
+  <div class="k">03 — Existing ecosystem — be technically fair</div>
+  <h2>What Existing Observability Platforms Already Provide</h2>
+  <div class="flow" style="margin-bottom:12px">
+    <span class="pill">Monitoring → detect</span><span class="ar">→</span>
+    <span class="pill">MELT → evidence</span><span class="ar">→</span>
+    <span class="pill">Correlation</span><span class="ar">→</span>
+    <span class="pill">RCA / probable causes</span><span class="ar">→</span>
+    <span class="pill">AI assistants</span>
+  </div>
+  <div class="g2 fill">
+    <div class="c">
+      <h3>These tools already do a lot — and we rely on that</h3>
+      <table>
+        <tr><th>Capability</th><th>What the engineer already gets</th></tr>
+        <tr><td>Dynatrace / AppDynamics / New Relic</td><td>Service topology, anomaly detection, problem cards</td></tr>
+        <tr><td>Datadog</td><td>Metrics, logs, traces, Watchdog, change correlation</td></tr>
+        <tr><td>Splunk</td><td>Log investigation, correlation searches, ITSI</td></tr>
+        <tr><td>Prometheus / Grafana / OTel</td><td>The raw evidence plane most teams already own</td></tr>
+      </table>
+      <p style="margin-top:10px">These capabilities significantly reduce investigation effort. We are not replacing them.</p>
+    </div>
+    <div class="c">
+      <h3>What that means for this project</h3>
+      <p>If a platform already names a probable cause with high confidence, the engineer should use it.</p>
+      <p style="margin-top:10px">Our target is the remainder: the evidence is rich, several explanations are still consistent, and the next query is still a human judgment call.</p>
+      <div class="q" style="margin-top:12px">Our project targets the decision point that remains when available evidence does not yet clearly distinguish competing explanations.</div>
+    </div>
+  </div>
+  <div class="notes"><b>Say:</b> Name vendors calmly. Do not attack them. This is how you sound like you have been on call. <b>Judge:</b> We know RCA exists. We are targeting residual uncertainty.</div>
+</section>
+
+<!-- 5 -->
+<section class="slide" data-t="The gap">
+  <div class="k">04 — Central claim</div>
+  <h2>The Remaining Investigation Gap</h2>
+  <div class="chain">
+    <div class="ch">Current evidence</div><div class="chx">→</div>
+    <div class="ch">Multiple plausible hypotheses</div><div class="chx">→</div>
+    <div class="ch inv">What should I investigate next?</div><div class="chx">→</div>
+    <div class="ch">More evidence</div><div class="chx">→</div>
+    <div class="ch">Refinement</div><div class="chx">→</div>
+    <div class="ch">Decision</div>
+  </div>
+  <div class="g2 fill">
+    <div class="c">
+      <h3>Not our job</h3>
+      <ul>
+        <li>Replace metrics, logs, traces, or APM</li>
+        <li>Claim commercial RCA “does not work”</li>
+        <li>Output one unexplained root cause and stop</li>
+        <li>Auto-change production</li>
+      </ul>
+    </div>
+    <div class="c">
+      <h3>Our job</h3>
+      <ul>
+        <li>Keep competing explanations explicit</li>
+        <li>Attach evidence to each explanation</li>
+        <li>When they still overlap, pick the next check they <em>disagree</em> about</li>
+        <li>Update beliefs from that result, then repeat</li>
+      </ul>
+    </div>
+  </div>
+  <div class="q">Our focus is not replacing observability or RCA. Our focus is selecting the next investigation step that is most useful for reducing uncertainty between plausible explanations.</div>
+  <div class="notes"><b>Say:</b> The gold box is the product. If they remember one sentence, use the quote. <b>Judge:</b> Gap is investigation policy, not detection.</div>
+</section>
+
+<!-- 6 -->
+<section class="slide" data-t="Solution">
+  <div class="k">05 — Solution</div>
+  <h2>Our Approach: Evidence-Guided Investigation</h2>
+  <p class="sub" style="margin-bottom:12px">Iterative loop — not Input → AI → Answer. Observe → Reason → Investigate → Update → Reason again.</p>
+  <div class="g3 fill">
+    <div class="c"><h3>1–3 Context</h3>
+      <p>1. Ingest incident evidence</p>
+      <p>2. Build incident context (alert, change, topology, priors)</p>
+      <p>3. Maintain competing hypotheses <span class="tag mid">in prototype: seeded in the case</span></p>
+    </div>
+    <div class="c" style="border-color:var(--hi)"><h3>4–6 Decision</h3>
+      <p>4. Evaluate evidence against each hypothesis</p>
+      <p>5. Identify residual uncertainty (close posteriors / rollback at stake)</p>
+      <p>6. Select next investigation step from disagreement, not from “what is reddest”</p>
+    </div>
+    <div class="c"><h3>7–9 Update</h3>
+      <p>7. Collect that evidence (probe)</p>
+      <p>8. Update confidence; eliminate if contradicted</p>
+      <p>9. Recommend diagnosis / action — engineer decides</p>
+    </div>
+  </div>
+  <div class="g2" style="margin-top:10px">
+    <div class="c"><h3>Conceptual product</h3><p>A general investigation assistant over live telemetry.</p></div>
+    <div class="c"><h3>What this repository is</h3><p>A working policy engine + console over recorded incident bundles, so the loop is reproducible and demoable.</p></div>
+  </div>
+  <div class="notes"><b>Say:</b> Concept vs prototype in the bottom row. Hypotheses are seeded today, not freely generated from raw prod. <b>Judge:</b> Iterative loop, honest about seeding.</div>
+</section>
+
+<!-- 7 -->
+<section class="slide" data-t="How it thinks">
+  <div class="k">06 — How the system thinks</div>
+  <h2>Hypothesis-Driven Investigation</h2>
+  <div class="g2 fill">
+    <div>
+      <div class="c" style="margin-bottom:8px"><h3>It does not pick the current leader and stop</h3>
+        <p>Even if H1 is 40% and H2 is 35%, acting on H1 can be wrong. The useful question is which available check would change those numbers.</p></div>
+      <div class="c hyp" style="margin-bottom:6px"><h3>H1 Database — illustrative 40%</h3><p>Predicts: connection wait leads; sibling service stays healthy.</p></div>
+      <div class="c hyp a" style="margin-bottom:6px"><h3>H2 Deployment — illustrative 35%</h3><p>Predicts: only this service fails; wait is a lagging symptom.</p></div>
+      <div class="c hyp b"><h3>H3 Network — illustrative 25%</h3><p>Predicts: traces show path loss independent of deploy/DB.</p></div>
+    </div>
+    <div class="c">
+      <h3>Prototype decision scoring — implemented in ic/probe.py</h3>
+      <p>Not a claim of optimal information theory. A transparent heuristic:</p>
+      <p class="mono" style="margin:10px 0;background:#0b1c24;padding:10px;border-radius:6px">divergence(observable) = # distinct predictions<br>among surviving hypotheses<br><br>info_gain(probe) = max divergence it measures<br><br>select = argmax( info_gain / cost_ms )</p>
+      <p>A1 Inspect DB connection wait — H1 vs H2 disagree → gain &gt; 0 → selected.</p>
+      <p style="margin-top:6px">A2 Re-read CPU — both already consistent with CPU↑ → gain 0 → skipped.</p>
+      <p style="margin-top:6px">A3 Heavy trace dump — may be down-weighted if load_class is heavy.</p>
+      <p style="margin-top:10px">VoI panel also shows eig − λ·cost − μ·risk for the engineer. In this build, <em>probe selection</em> uses the rule above.</p>
+    </div>
+  </div>
+  <p class="foot">Percentages on the left are an illustrative teaching example. Live numbers come from softmax over lens scores, clamped to 94% max.</p>
+  <div class="notes"><b>Say:</b> Heart of the project: distinguish, do not crown the current leader. Then read the formula so a judge who opens probe.py is not surprised. <b>Judge:</b> Heuristic, inspectable, not a fake theorem.</div>
+</section>
+
+<!-- 8 -->
+<section class="slide" data-t="Engineer workflow">
+  <div class="k">07 — User workflow</div>
+  <h2>How a DevOps Engineer Uses the System</h2>
+  <div class="g2 fill">
+    <div class="c">
+      <h3>AI = investigation assistant</h3>
+      <ol class="ol">
+        <li>Incident is already detected in the existing stack</li>
+        <li>Engineer opens the investigation workspace</li>
+        <li>System loads current evidence (prior fan-out)</li>
+        <li>Competing hypotheses and supporting refs are shown</li>
+        <li>If still close, system proposes the next check and why</li>
+        <li>Check is run against the case; result is attached and hashed</li>
+        <li>Confidence updates; a hypothesis may be eliminated with a reason</li>
+        <li>Diagnosis + rollback recommendation — not an auto-rollback</li>
+      </ol>
+    </div>
+    <div class="c">
+      <h3>Human = decision owner</h3>
+      <table>
+        <tr><th>System may</th><th>System must not (this build)</th></tr>
+        <tr><td>Score hypotheses</td><td>Page production by itself</td></tr>
+        <tr><td>Recommend a probe</td><td>Silently change traffic</td></tr>
+        <tr><td>Recommend rollback</td><td>Execute rollback</td></tr>
+        <tr><td>Seal the trail</td><td>Replace the incident commander</td></tr>
+      </table>
+      <p style="margin-top:12px"><span class="tag mid">Prototype path</span> Engineer selects a recorded case (INC-4471…) and presses Investigate. Live pager ingest is future work.</p>
+      <p style="margin-top:8px">Mitigation still happens in the engineer’s normal tools: pipeline, kubectl, feature flag, vendor console.</p>
+    </div>
+  </div>
+  <div class="notes"><b>Say:</b> Occupational workflow. You still have Grafana. This is the investigation notebook. <b>Judge:</b> Enterprise-safe human-in-the-loop.</div>
+</section>
+
+<!-- 9 -->
+<section class="slide" data-t="Working prototype">
+  <div class="k">08 — Working software  ·  only panels that exist in console/src/App.tsx</div>
+  <h2>Working E2E Prototype</h2>
+  <div class="g3 fill">
+    <div class="c"><h3><span class="tag ok">Built</span> Shell</h3>
+      <p>Left rail: Investigations, Ablation &amp; Calibration, Incident Bundles, Offline Verifier, Docs. Incident picker, probes on/off, replay, Investigate.</p></div>
+    <div class="c"><h3><span class="tag ok">Built</span> Agent Lanes</h3>
+      <p>Change (deploy-biased), Telemetry (signal-biased), History (pattern-biased) stream rationales and cited evidence as they score.</p></div>
+    <div class="c"><h3><span class="tag ok">Built</span> Probe Selection</h3>
+      <p>Ambiguity banner (margin vs τ=0.15), selected probe id, info-gain, cost_ms, returned summary + hash.</p></div>
+    <div class="c"><h3><span class="tag ok">Built</span> Hypothesis Board</h3>
+      <p>H1/H2 cards: owner, posterior %, claim, bar, elimination reason, evidence refs, verdict, rollback gated.</p></div>
+    <div class="c"><h3><span class="tag ok">Built</span> Evidence Chain</h3>
+      <p>Cited leaves tagged prior / probe. Merkle root + Ed25519 on verdict. Offline <span class="mono">verify.py</span>.</p></div>
+    <div class="c"><h3><span class="tag ok">Built</span> VoI panel</h3>
+      <p>Ranks remaining actions with EIG / cost / risk. Intervention shown gated. Live canary is not executed.</p></div>
+  </div>
+  <div class="g2" style="margin-top:10px">
+    <div class="c"><h3><span class="tag mid">Partial</span></h3>
+      <p>Optional LLM prior scoring. Ablation charts from harness. INC-4478 simulated cohort-split after a UI Approve (server does not wait on a real traffic shifter).</p></div>
+    <div class="c"><h3><span class="tag no">Not in this UI — planned</h3>
+      <p>Live severity/timeline widget, explicit support-vs-contradict matrix, PagerDuty ingest, SSO. Do not demo those as if they exist.</p></div>
+  </div>
+  <div class="notes"><b>Say:</b> This is an inventory of the running app, not a wish list. <b>Judge:</b> They can map every box to a panel in the live demo.</div>
+</section>
+
+<!-- 10 -->
+<section class="slide" data-t="Workspace UI">
+  <div class="k">09 — Actual investigation workspace  ·  INC-4471 mid-run  ·  layout from the real console</div>
+  <h2>Incident Investigation Workspace</h2>
+  <div class="ui">
+    <div class="rail"><div class="rbtn on">IC</div><div class="rbtn">A</div><div class="rbtn">B</div><div class="rbtn">V</div></div>
+    <div class="work">
+      <div class="tb">Incident Commander <span>VoI Investigation Console</span> <span style="margin-left:auto;font-weight:400;color:#85929e">Home / Investigations / INC-4471 / ambiguous</span></div>
+      <div class="ctrl"><span class="mono">INC-4471 · checkout 5xx after deploy</span> <label>probes ✓</label> <label>replay ✓</label> <button class="btn">Investigate</button> <span style="color:#e67e22">ground truth · H1 · rollback true</span></div>
+      <div class="ugrid">
+        <div class="uc" style="grid-row:1">
+          <h4>Agent lanes — change / telemetry / history</h4>
+          <div><b>Change</b> H1 +0.55 deploy landed 8.2 min before the alert</div>
+          <div><b>Telemetry</b> H2 +0.95 upstream inventory-service/p99 moved before the alert</div>
+          <div><b>History</b> H1 +0.35 matches pool misconfiguration runbook</div>
+        </div>
+        <div class="uc">
+          <h4>Probe selection — next investigation</h4>
+          <div style="background:#eaf6fb;border-left:3px solid #049fd9;padding:4px 6px;margin-bottom:4px">Hypotheses within τ=0.15 — fetch a discriminator</div>
+          <div><b>P_conn_wait</b></div>
+          <div>Connection-wait histogram, 08:55–09:10</div>
+          <div>info-gain <b>2</b> · 410 ms · selected over P_inv_errors (gain 0)</div>
+        </div>
+        <div class="uc">
+          <h4>Hypothesis board</h4>
+          <div><b>H1</b> Change · pool cut caused contention</div>
+          <div class="hb"><div class="hf g" style="width:52%"></div></div>
+          <div><b>H2</b> Telemetry · upstream inventory cascaded</div>
+          <div class="hb"><div class="hf" style="width:48%"></div></div>
+          <div style="color:#85929e">After probe: H2 eliminated — wait rose first, not later. H1 ~94% (cap). Rollback recommended, not fired.</div>
+        </div>
+        <div class="uc">
+          <h4>Evidence chain</h4>
+          <div>prior · github://…/deploys/v2.14.0</div>
+          <div>prior · prometheus://…/cpu</div>
+          <div>prior · inventory-service/p99_latency</div>
+          <div>probe · connection_wait_time · sha256 …</div>
+          <div style="margin-top:4px;color:#27ae60;font-weight:700">Sealed · merkle + ed25519</div>
+        </div>
+        <div class="uc" style="grid-column:1/-1">
+          <h4>VoI · next action ranking (display)</h4>
+          P_conn_wait EIG 2.00 &nbsp;·&nbsp; P_inv_errors EIG 0 &nbsp;·&nbsp; I_traffic_shift (gated, not executed) &nbsp;·&nbsp; voi = eig − λ·cost − μ·risk
+        </div>
+      </div>
+    </div>
+  </div>
+  <p class="foot">This is the real panel set. A dedicated left-rail incident metadata card and support/contradict columns are planned enhancements, not current UI.</p>
+  <div class="notes"><b>Say:</b> This is what they will see live. Walk lanes → ticker → board → chain. <b>Judge:</b> UI exists; we are not showing a Figma fantasy.</div>
+</section>
+
+<!-- 11 -->
+<section class="slide" data-t="Evidence matrix">
+  <div class="k">10 — Evidence → hypothesis  ·  teaching matrix is illustrative; right column is INC-4471 as implemented</div>
+  <h2>How Evidence Changes Hypothesis Confidence</h2>
+  <div class="g2 fill">
+    <div class="c">
+      <h3>Illustrative first-screen matrix — not live calculator output</h3>
+      <table class="mtx">
+        <tr><th></th><th>H1 DB</th><th>H2 Deploy</th><th>H3 Net</th><th>H4 Dep</th></tr>
+        <tr><td>DB latency ↑</td><td class="s y">supports</td><td class="s z">neutral</td><td class="s z">neutral</td><td class="s y">supports</td></tr>
+        <tr><td>CPU ↑</td><td class="s y">supports</td><td class="s y">supports</td><td class="s z">neutral</td><td class="s y">supports</td></tr>
+        <tr><td>Network errors</td><td class="s z">neutral</td><td class="s z">neutral</td><td class="s y">supports</td><td class="s y">supports</td></tr>
+        <tr><td>Recent deploy</td><td class="s z">neutral</td><td class="s y">supports</td><td class="s z">neutral</td><td class="s n">weakens*</td></tr>
+        <tr><td>Downstream errors</td><td class="s z">neutral</td><td class="s n">weakens</td><td class="s z">neutral</td><td class="s y">supports</td></tr>
+      </table>
+      <p style="margin-top:8px">This is why the first screen does not decide. Too many “supports” land on more than one column.</p>
+    </div>
+    <div class="c">
+      <h3>Implemented update on INC-4471</h3>
+      <p>Prior: both H1 and H2 receive real logit support (deploy timing vs upstream-early metric vs runbook keywords).</p>
+      <p style="margin-top:8px">Probe <span class="mono">connection_wait</span>:</p>
+      <table>
+        <tr><th>Hypothesis</th><th>Predicted</th><th>Observed</th><th>Result</th></tr>
+        <tr><td>H1</td><td class="mono">rises_first</td><td class="mono">rises_first</td><td>+1.6 log-odds</td></tr>
+        <tr><td>H2</td><td class="mono">rises_later</td><td class="mono">rises_first</td><td>−2.6 and eliminated</td></tr>
+      </table>
+      <p style="margin-top:8px">Softmax + cap → winner posterior 0.94. That 94% is a <em>calibration cap</em> in code, not a claim of certainty.</p>
+      <p style="margin-top:8px">Interpreter used: ordering (which series sustainedly leads). Other cases use sibling threshold or cohort dispersion.</p>
+    </div>
+  </div>
+  <div class="notes"><b>Say:</b> Left is pedagogy. Right is the engine. Never present 40/35/25 as if the prototype emitted them for INC-4471. <b>Judge:</b> Traceable updates.</div>
+</section>
+
+<!-- 12 -->
+<section class="slide" data-t="Next best">
+  <div class="k">11 — Strongest technical slide</div>
+  <h2>From “What Is the Cause?” to “What Should I Check Next?”</h2>
+  <div class="g3 fill">
+    <div class="c">
+      <h3>State</h3>
+      <p>Uncertainty: H1 vs H2 still inside τ=0.15, or leader implies rollback.</p>
+      <p style="margin-top:8px">Catalog: P_conn_wait (wait time), P_inv_errors (inventory errors).</p>
+      <p style="margin-top:8px">Already visible: CPU, 5xx, deploy diff, inventory p99 blip — none of these is allowed to be the hidden discriminator (authoring invariant).</p>
+    </div>
+    <div class="c" style="border-color:var(--hi)">
+      <h3>Prototype scoring — actual</h3>
+      <p>Usefulness ≈ do surviving hyps predict different labels?</p>
+      <p>Relevance ≈ probe.measures ∩ predicted_observations</p>
+      <p>Cost ≈ authored cost_ms (not live load)</p>
+      <p>Risk ≈ 0 for observations; constant for gated intervention display</p>
+      <p class="mono" style="margin-top:8px">P_conn_wait: divergence 2 / 410ms</p>
+      <p class="mono">P_inv_errors: divergence 0 → skipped</p>
+    </div>
+    <div class="c hyp w">
+      <h3>Next best action</h3>
+      <p style="font-size:18px;font-weight:700">Inspect connection-wait (P_conn_wait)</p>
+      <p style="margin-top:8px">Why: H1 says wait leads; H2 says wait lags. One cheap histogram falsifies one story.</p>
+      <p style="margin-top:8px">Why not inventory errors: they do not split the two predictions, so they cannot reduce this uncertainty.</p>
+    </div>
+  </div>
+  <div class="q">We do not claim an optimal information-theoretic policy. We claim a working, inspectable scoring rule whose ablation we can show: hide this check, and the hard cases are not resolved from prior evidence alone.</div>
+  <div class="notes"><b>Say:</b> This is the conversion from RCA-language to investigation-language. Then the honesty line on information theory. <b>Judge:</b> Credible under questioning.</div>
+</section>
+
+<!-- 13 -->
+<section class="slide" data-t="Architecture">
+  <div class="k">12 — One high-level architecture  ·  solid = in repo  ·  dashed = not integrated</div>
+  <h2>High-Level System Architecture</h2>
+  <div class="g4 fill">
+    <div class="c">
+      <h3>Data</h3>
+      <p><b>In this build:</b> authored incident bundles in <span class="mono">corpus/</span> — alert, prior evidence, probeable evidence, probe catalog, seeded hypotheses, ground truth.</p>
+      <p style="margin-top:8px;color:var(--muted)"><b>Not connected:</b> Prometheus, Datadog, Splunk, OTel, PagerDuty, GitHub, Kubernetes. URIs in JSON are labels.</p>
+    </div>
+    <div class="c" style="border-color:var(--hi)">
+      <h3>Processing</h3>
+      <p>Bundle loader + probe gate</p>
+      <p>Orchestrator event loop</p>
+      <p>FastAPI HTTP + WebSocket</p>
+      <p>Replay recorder for stable demos</p>
+      <p class="mono" style="margin-top:8px">ic/bundle.py · orchestrator.py · server/app.py</p>
+    </div>
+    <div class="c">
+      <h3>Reasoning</h3>
+      <p>Change / telemetry / history lenses</p>
+      <p>Adjudicator (no tools)</p>
+      <p>Probe selector + interpreters</p>
+      <p>VoI overlay (display)</p>
+      <p>Optional LLM JSON priors</p>
+      <p>Merkle + Ed25519 seal</p>
+    </div>
+    <div class="c">
+      <h3>Interface</h3>
+      <p>React investigation console</p>
+      <p>Ablation &amp; calibration charts</p>
+      <p>CLI: investigate, harness, verify</p>
+      <p>Engineer watches, starts, optionally approves UI-gated steps</p>
+    </div>
+  </div>
+  <div class="flow" style="margin-top:12px">
+    <span class="pill">Cases</span><span class="ar">→</span>
+    <span class="pill hi">Engine</span><span class="ar">→</span>
+    <span class="pill hi">API / WS</span><span class="ar">→</span>
+    <span class="pill hi">Console</span><span class="ar">→</span>
+    <span class="pill">Engineer</span>
+  </div>
+  <div class="notes"><b>Say:</b> Four columns. Do not draw live Datadog. If asked “where is the DB?” — there isn’t one; state is JSON + memory. <b>Judge:</b> Architecture matches folders.</div>
+</section>
+
+<!-- 14 -->
+<section class="slide" data-t="Implemented">
+  <div class="k">13 — Implementation honesty</div>
+  <h2>What Is Actually Implemented</h2>
+  <div class="g2 fill">
+    <div class="c">
+      <h3>Implemented now — demonstrable</h3>
+      <table>
+        <tr><th>Feature</th><th>What it does</th></tr>
+        <tr><td>Incident case load</td><td>Reads corpus JSON; prior evidence always visible</td></tr>
+        <tr><td>Hypothesis maintenance</td><td>Seeds H1/H2 from the case; scores via three lenses</td></tr>
+        <tr><td>Evidence mapping</td><td>Each contribution must cite resolvable refs or is penalised</td></tr>
+        <tr><td>Investigation scoring</td><td>Divergence / cost_ms; skip gain=0</td></tr>
+        <tr><td>Next-step recommendation</td><td>Probe ticker + VoI ranking in UI</td></tr>
+        <tr><td>Iterative update</td><td>Match/mismatch interpreters; eliminate + reason</td></tr>
+        <tr><td>Incident UI</td><td>Full console described on previous slides</td></tr>
+        <tr><td>AI path</td><td>Optional LLM priors; default analytical engine</td></tr>
+        <tr><td>Evaluation</td><td>Ablation harness probes on vs off</td></tr>
+        <tr><td>Audit</td><td>Sealed postmortem + offline verifier</td></tr>
+      </table>
+    </div>
+    <div class="c">
+      <h3>Future enhancements — not claimed today</h3>
+      <table>
+        <tr><th>Item</th><th>Why later</th></tr>
+        <tr><td>Live incident ingest</td><td>No PagerDuty/webhook in repo</td></tr>
+        <tr><td>Live evidence extraction</td><td>No PromQL/log clients</td></tr>
+        <tr><td>Open-ended hypothesis generation</td><td>Hyps are authored</td></tr>
+        <tr><td>Vector similar-incident search</td><td>Keyword overlap only</td></tr>
+        <tr><td>Formal information gain</td><td>Integer divergence, not entropy</td></tr>
+        <tr><td>Production canary</td><td>Fixture + UI gate only</td></tr>
+        <tr><td>SSO / RBAC / k8s / CI</td><td>Out of scope in README</td></tr>
+        <tr><td>Unit/e2e test suite</td><td>Harness is evaluation, not CI tests</td></tr>
+      </table>
+    </div>
+  </div>
+  <div class="notes"><b>Say:</b> Left is the demo. Right is how we survive Q&amp;A. <b>Judge:</b> Progress is real; scope is bounded.</div>
+</section>
+
+<!-- 15 -->
+<section class="slide" data-t="E2E demo">
+  <div class="k">14 — Live demonstration script</div>
+  <h2>End-to-End Incident Investigation</h2>
+  <div class="chain">
+    <div class="ch">INC-4471 opened</div><div class="chx">→</div>
+    <div class="ch">Prior evidence</div><div class="chx">→</div>
+    <div class="ch">H1 vs H2 scored</div><div class="chx">→</div>
+    <div class="ch inv">P_conn_wait</div><div class="chx">→</div>
+    <div class="ch">Wait rises first</div><div class="chx">→</div>
+    <div class="ch">H2 out · H1 in</div>
+  </div>
+  <div class="g2 fill" style="margin-top:12px">
+    <div class="c">
+      <h3>What judges will see — and what is real</h3>
+      <table>
+        <tr><th>Step</th><th>Label</th></tr>
+        <tr><td>Case selection</td><td><span class="tag mid">Preconfigured bundle</span></td></tr>
+        <tr><td>Lens scoring, ambiguity, probe choice, update, seal</td><td><span class="tag ok">Live policy</span></td></tr>
+        <tr><td>Probe payload (the wait series)</td><td><span class="tag mid">Fixture read, not Prometheus</span></td></tr>
+        <tr><td>Rollback</td><td><span class="tag ok">Recommended only</span></td></tr>
+      </table>
+      <p style="margin-top:10px">Then: same incident, probes <b>off</b>. Discriminator unreachable. That is the proof that the next-check step is doing work.</p>
+    </div>
+    <div class="c">
+      <h3>Runbook</h3>
+      <p class="mono">uvicorn server.app:app --port 8000<br>cd console && npm run dev<br>→ localhost:5173</p>
+      <p style="margin-top:8px">Optional: Ablation tab. Optional: <span class="mono">python verify.py postmortem.json</span> then tamper one byte.</p>
+      <p style="margin-top:8px">Do not lead with INC-4478 unless you will say the canary result is simulated.</p>
+      <p style="margin-top:8px">Fallback: <span class="mono">python -m ic.investigate INC-4471</span> prints the same event loop.</p>
+    </div>
+  </div>
+  <div class="notes"><b>Say during demo:</b> “Selection is live; the series is from the case file.” Then probes-off. <b>Judge:</b> E2E of the core idea, honestly labeled.</div>
+</section>
+
+<!-- 16 -->
+<section class="slide" data-t="Value">
+  <div class="k">15 — Practical value</div>
+  <h2>Where This Helps the Incident Responder</h2>
+  <div class="g2 fill">
+    <div class="c">
+      <h3>Designed to reduce unnecessary exploration</h3>
+      <p>Prefer the check that splits remaining stories over another dashboard that both stories already survive.</p>
+      <h3 style="margin-top:12px">Evidence-driven reasoning</h3>
+      <p>Every score cites refs. Elimination prints predicted vs observed. Verdict can be sealed and verified later.</p>
+      <h3 style="margin-top:12px">Lower cognitive load</h3>
+      <p>Hypotheses, evidence, next step, and trail in one workspace instead of five browser tabs.</p>
+    </div>
+    <div class="c">
+      <h3>Human-in-the-loop</h3>
+      <p>The engineer owns mitigation. The system does not autonomously roll back or shift traffic in this build.</p>
+      <h3 style="margin-top:12px">More consistent investigation</h3>
+      <p>Targets on-call variance: the discriminating question does not depend only on who remembers the runbook.</p>
+      <h3 style="margin-top:12px">Reusable paths — partial today</h3>
+      <p>History lens matches runbook/prior-incident keywords. A real knowledge base of investigation paths is future work.</p>
+      <div class="q" style="margin-top:12px">Wording we will use: designed to / targets / potentially improves. Not “reduces MTTR by X%.”</div>
+    </div>
+  </div>
+  <div class="notes"><b>Say:</b> Value is decision quality under ambiguity. Senior SREs do this in their heads; we make the loop explicit. <b>Judge:</b> Why would I open this on a SEV-2?</div>
+</section>
+
+<!-- 17 -->
+<section class="slide" data-t="Future">
+  <div class="k">16 — Same engine, stronger data plane</div>
+  <h2>Future Work</h2>
+  <p class="sub" style="margin-bottom:10px">We have a working core. These are extensions of the same investigation system, not a pivot.</p>
+  <div class="g3 fill">
+    <div class="c"><h3>1. Real-time integrations</h3>
+      <p>Read-only Prometheus, Grafana, OpenTelemetry, Kubernetes events, GitHub/GitLab deploys, PagerDuty. Replace fixture <span class="mono">run_probe</span> with real queries.</p></div>
+    <div class="c"><h3>2. Investigation scoring</h3>
+      <p>Move from integer divergence to formal expected information gain; cost from live load; risk from blast radius — and drive selection from that, not only display it.</p></div>
+    <div class="c"><h3>3. Automated evidence collection</h3>
+      <p>Safe read-only diagnostic checks the engineer can approve. Still no silent writes.</p></div>
+    <div class="c"><h3>4. Historical learning</h3>
+      <p>Incident knowledge base, similar-incident retrieval, reuse of previous investigation paths — beyond keyword overlap.</p></div>
+    <div class="c"><h3>5. Causal structure</h3>
+      <p>Use the topology field that is already stored but unused; multi-factor incidents; dependency-aware probes.</p></div>
+    <div class="c"><h3>6–7. Bounded experiments &amp; evaluation</h3>
+      <p>Canary only with server-side approval, hard traffic/time caps, auto-revert. Measure investigation steps, acceptance, and accuracy on a larger realistic set — not a fake MTTR slide.</p></div>
+  </div>
+  <div class="notes"><b>Say:</b> Near = tests + more cases. Next = live read-only. Advanced = cost/risk + experiments. <b>Judge:</b> Path to production use without changing the problem.</div>
+</section>
+
+<!-- 18 -->
+<section class="slide title" data-t="What we are solving">
+  <div class="k">What we are solving</div>
+  <h2>Observability gives engineers evidence.<br>Our system helps them decide what to investigate next when that evidence is still ambiguous.</h2>
+  <div class="chain" style="margin:22px 0">
+    <div class="ch">Evidence</div><div class="chx">→</div>
+    <div class="ch">Hypotheses</div><div class="chx">→</div>
+    <div class="ch inv">Uncertainty</div><div class="chx">→</div>
+    <div class="ch inv">Next investigation</div><div class="chx">→</div>
+    <div class="ch">More evidence</div><div class="chx">→</div>
+    <div class="ch">Better decision</div>
+  </div>
+  <div class="q">From collecting signals to guiding investigation.</div>
+  <div class="g3" style="margin-top:18px;max-width:980px">
+    <div class="c"><h3>Problem</h3><p>Residual uncertainty after the first screen.</p></div>
+    <div class="c"><h3>Prototype</h3><p>Working loop on recorded cases: score, probe, update, seal.</p></div>
+    <div class="c"><h3>Path</h3><p>Same engine, live read-only telemetry next.</p></div>
+  </div>
+  <div class="foot">Questions  ·  Demo: INC-4471  ·  docs/presentation.html</div>
+  <div class="notes"><b>Say the title lines, then stop.</b> Q&amp;A: live data = roadmap; canary = not live; LLM = optional priors; Datadog = complement not replace; 94% = cap.</div>
+</section>
+
+</div>
+
+<div class="bar">
+  <span>Incident Commander  ·  next-best investigation</span>
+  <span class="dots" id="dots"></span>
+  <span id="c"></span>
+</div>
+<aside class="help"><div class="c" style="width:480px"><h3>Controls</h3><p><kbd>→</kbd> next &nbsp; <kbd>←</kbd> prev &nbsp; <kbd>S</kbd> notes &nbsp; <kbd>F</kbd> fullscreen &nbsp; <kbd>?</kbd> help</p></div></aside>
+<script>
+const slides=[...document.querySelectorAll(".slide")];
+const dots=document.getElementById("dots");
+const c=document.getElementById("c");
+let i=0;
+slides.forEach(()=>{const d=document.createElement("span");d.className="dot";dots.appendChild(d)});
+const ds=[...dots.querySelectorAll(".dot")];
+function show(n){i=Math.max(0,Math.min(slides.length-1,n));slides.forEach((s,k)=>s.classList.toggle("on",k===i));ds.forEach((d,k)=>d.classList.toggle("on",k===i));c.textContent=(i+1)+" / "+slides.length+"  ·  "+slides[i].dataset.t}
+document.addEventListener("keydown",e=>{
+  if(["ArrowRight"," ","PageDown","n","N"].includes(e.key)){e.preventDefault();show(i+1)}
+  if(["ArrowLeft","PageUp","p","P","Backspace"].includes(e.key)){e.preventDefault();show(i-1)}
+  if(e.key==="s"||e.key==="S")document.body.classList.toggle("notes-on");
+  if(e.key==="f"||e.key==="F")document.documentElement.requestFullscreen?.();
+  if(e.key==="?"||e.key==="h")document.body.classList.toggle("help-on");
+  if(e.key==="Escape")document.body.classList.remove("help-on");
+});
+show(0);
+</script>
+</body>
+</html>
