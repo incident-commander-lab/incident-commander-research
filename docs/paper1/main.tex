@@ -1,0 +1,16 @@
+% Minimal wrapper to compile the Introduction alone (e.g. upload this folder to Overleaf).
+% Swap the class for the conference template (IEEEtran shown) when the venue is fixed.
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit}
+\input{numbers}
+\begin{document}
+\title{Who Should Decide? A Decision-Theoretic Rule over LLM Hypotheses for Cloud Incident Response}
+\author{\IEEEauthorblockN{Shahesta Salama and Nourseen Tarek}}
+\maketitle
+\input{fig_ir}
+\input{intro}
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+\end{document}

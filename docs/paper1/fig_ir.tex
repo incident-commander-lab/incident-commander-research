@@ -1,0 +1,33 @@
+% Figure 1: the incident-response lifecycle and the decisions an agent must take.
+% Needs \usepackage{tikz} and \usetikzlibrary{arrows.meta,positioning,fit} in the preamble.
+\begin{figure}[t]
+\centering
+\resizebox{\columnwidth}{!}{%
+\begin{tikzpicture}[
+  node distance=4mm and 3mm,
+  stage/.style={draw, rounded corners=2pt, minimum height=8mm, minimum width=15mm,
+                align=center, font=\footnotesize, fill=gray!8},
+  dec/.style={draw, rounded corners=2pt, align=center, font=\scriptsize, fill=blue!6},
+  arr/.style={-{Stealth[length=2mm]}, thick}]
+  \node[stage] (det) {Detect\\\scriptsize alert / SLO breach};
+  \node[stage, right=of det] (tri) {Triage\\\scriptsize is it real?};
+  \node[stage, right=of tri] (dia) {Diagnose\\\scriptsize which service, why?};
+  \node[stage, right=of dia] (mit) {Mitigate\\\scriptsize rollback, restart};
+  \node[stage, right=of mit] (rec) {Recover \&\\\scriptsize post-mortem};
+  \foreach \a/\b in {det/tri, tri/dia, dia/mit, mit/rec} \draw[arr] (\a) -- (\b);
+  % the decisions inside the loop, which this paper studies
+  \node[dec, below=6mm of dia, xshift=-9mm] (chk) {\textbf{check}\\next probe?};
+  \node[dec, right=2mm of chk] (stp) {\textbf{stop}\\enough evidence?};
+  \node[dec, right=2mm of stp] (act) {\textbf{act or}\\\textbf{escalate}?};
+  \node[draw, dashed, rounded corners, fit=(chk)(stp)(act), inner sep=2mm,
+        label={[font=\scriptsize]below:who decides: the LLM, or a fixed decision rule?}] (box) {};
+  \draw[arr, dashed] (dia.south) -- (box.north -| dia.south);
+  \draw[arr, dashed] (act.east) -| (mit.south);
+\end{tikzpicture}}
+\caption{The incident-response lifecycle for an operational outage. Most time is
+spent in triage and diagnosis, where the responder repeatedly decides which check
+to run next, when the evidence suffices, and whether to apply a reversible fix or
+escalate to a human. This paper studies \emph{who} should make these decisions
+when an LLM is in the loop.}
+\label{fig:ir}
+\end{figure}

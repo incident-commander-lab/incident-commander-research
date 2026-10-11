@@ -1,0 +1,118 @@
+% Paper 1, Section 1. Requires \input{numbers} in the preamble (provisional values),
+% \input{fig_ir} where Fig. 1 should float, and refs.bib.
+% Length: about one page in a two-column IEEE/ACM layout, plus Fig. 1.
+
+\section{Introduction}
+\label{sec:intro}
+
+% --- what incident response is ------------------------------------------------
+Modern online services run as many interdependent microservices on shared cloud
+infrastructure, and they fail in ways no single component explains. A bad
+deployment, a misconfigured port, an exhausted connection pool or a pod stuck on an
+unschedulable node can each surface only as rising latency or errors somewhere
+downstream. \emph{Incident response} (IR) is the process by which operators
+restore such a service: an alert or a breached service-level objective (SLO)
+\emph{detects} the problem, responders \emph{triage} whether it is real,
+\emph{diagnose} which component failed and why, \emph{mitigate} it (for example
+by rolling back a release or restarting a workload), and finally recover and
+write a post-mortem~\cite{beyer2016sre,nist80061r3}. Fig.~\ref{fig:ir} shows this
+lifecycle. Its most expensive part is the diagnostic loop: under time pressure,
+the responder repeatedly decides which check to run next, when the evidence is
+sufficient, and whether to act or to call in someone more senior.
+
+% --- recent developments -------------------------------------------------------
+Large language models (LLMs) have rapidly entered this loop. Early work used LLMs
+to recommend root causes and mitigations from incident text~\cite{ahmed2023recommending,chen2024rcacopilot};
+tool-using agents now query logs, metrics and the cluster
+directly~\cite{wang2024rcagent}, usually following the ReAct pattern of interleaved
+reasoning and actions~\cite{yao2023react}. Benchmarks such as
+AIOpsLab~\cite{chen2025aiopslab}, ITBench~\cite{jha2025itbench} and
+OpenRCA~\cite{xu2025openrca} now inject real faults into running systems and grade
+agents automatically, and several vendors market autonomous ``AI SRE'' agents.
+
+% --- limitations / motivation ------------------------------------------------------
+These benchmarks also expose the limits of the prevailing design, in which the LLM
+controls the entire investigation. Success rates remain low: on ITBench, agents built on state-of-the-art models
+resolve only 11.4\% of SRE scenarios~\cite{jha2025itbench}.
+Because the LLM chooses its own next step, it repeats checks, wanders, and stops
+when its narrative feels complete rather than when the evidence is; its stated
+confidence is not calibrated against outcomes; and every step consumes tokens.
+None of these behaviours is auditable in advance, which is precisely what an
+operator needs before granting an agent the right to change production. Industry
+analysts accordingly expect many agentic AI projects to be abandoned before they
+deliver value~\cite{gartner2025agentic}. The underlying decision problem is not new:
+\emph{decision-theoretic troubleshooting} chose the next observation, repair or
+escalation by expected cost three decades ago~\cite{heckerman1995decision,breese1996decision,langseth2003decision},
+and active probing selected the most informative test in distributed
+systems~\cite{rish2005adaptive}. Those methods, however, required a probabilistic
+model of each system to be built by hand, which cannot keep pace with
+infrastructure that changes weekly. LLM agents removed the hand-built model, and
+with it the decision theory.
+
+% --- research questions --------------------------------------------------------------
+We ask whether the two can be recombined, with the LLM building the model and a
+fixed rule taking the decisions. Concretely:
+\textbf{RQ1}: if an LLM proposes candidate root causes, each with the outcome it
+predicts for every available check, can a fixed expected-utility rule choose which
+checks to run and when to stop more efficiently than an LLM making those choices,
+without losing diagnostic accuracy?
+\textbf{RQ2}: can the same rule decide between applying a reversible mitigation,
+gathering more evidence and escalating to a human, and does its behaviour shift
+sensibly as the customer impact of the incident grows?
+The rationale is to separate what LLMs do well (reading heterogeneous evidence and
+imagining causes) from what they do poorly (disciplined, cost-aware sequential
+decisions), and to make the latter deterministic and inspectable.
+
+% --- proposed approach -------------------------------------------------------------
+Our agent keeps an explicit belief over the LLM's hypotheses plus a ``no fault''
+hypothesis and per-service catch-all causes, and updates it by Bayes' rule with a
+per-check error model. For every unrun check it computes the value of information,
+the expected reduction in uncertainty minus a cost term, runs the best check, and
+stops when no check is worth its cost. The LLM is called only to propose and, if
+every hypothesis is contradicted, to revise hypotheses; it never selects checks
+or decides to stop. For mitigation, the same expected-cost calculation compares
+reversible actions, further checks and escalation, with every state-changing
+action additionally gated by an external policy engine.
+
+% --- evaluation / why we trust the result -------------------------------------------------
+We evaluate RQ1 on all \nProblems{} Kubernetes problems of AIOpsLab~\cite{chen2025aiopslab}
+across \nApps{} applications, covering detection, localization and root-cause
+analysis, with two open models (Qwen3 8B and 14B~\cite{yang2025qwen3}). Six
+conditions share the same model, tools, problems and step budget and differ only in
+who decides: a plain ReAct agent; the LLM choosing checks from our hypotheses;
+random checks with our stopping rule; our rule; and running every check.
+Comparisons are paired on identical problems with exact McNemar
+tests~\cite{mcnemar1947note} and Wilson intervals~\cite{wilson1927probable}. We
+audited every run for tool failures and re-ran all runs affected by a measurement
+defect we found, and we report a failure of our original rule on the larger model
+together with its correction. We evaluate RQ2 in a simulator of paired incidents
+against a utility gate without an information term, a confidence-threshold
+escalator, and a diagnose-first policy, across four levels of customer impact and
+a sensitivity analysis. Our rule answers correctly on \accOursEight{} and
+\accOursFourteen{} of problems (8B and 14B), against \accReactEight{} and
+\accReactFourteen{} for the ReAct agent, using an order of magnitude fewer tokens
+(\tokOursEight{} vs.\ \tokReactEight{} per incident on 8B). Against an LLM choosing
+from the same hypotheses it is statistically tied in accuracy at about a third of
+the tokens. In RQ2 it has the lowest expected cost at \rqTwoWins{} impact levels.
+
+% --- contributions --------------------------------------------------------------------------
+In summary, this paper makes the following contributions:
+\begin{itemize}
+  \item \textbf{An architecture} that couples LLM-generated hypothesis models with
+        classical decision-theoretic troubleshooting: a fixed, inspectable rule
+        selects checks, stops, and chooses between reversible action and
+        escalation, while the LLM only proposes and revises hypotheses.
+  \item \textbf{A controlled evaluation on a public benchmark} (\nProblems{}
+        AIOpsLab problems, two models, six conditions) that isolates \emph{who
+        decides} from \emph{what the model knows}, with paired statistics, cost in
+        tokens and checks, and an audit of measurement errors.
+  \item \textbf{Evidence that the rule matches LLM-directed accuracy at a fraction
+        of the cost} and far exceeds a plain ReAct agent, together with a reported
+        failure mode of the original rule on a larger model and its correction.
+  \item \textbf{An act-or-escalate analysis} showing that the same rule adapts its
+        willingness to act to customer impact and stays cheaper than
+        confidence-threshold and information-free baselines under misspecified
+        assumptions.
+  \item \textbf{A reproducible artefact}, to be released with the paper: the
+        agent, the benchmark harness, an offline replay tool and all run traces.
+\end{itemize}
