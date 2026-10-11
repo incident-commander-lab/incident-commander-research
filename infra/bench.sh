@@ -319,11 +319,29 @@ fetch)
   ensure_running
   say "Copying results to $LOCAL_RESULTS"
   mkdir -p "$LOCAL_RESULTS"
-  host 300 'cd ~ && echo BEGIN_B64 && tar czf - results 2>/dev/null | base64 -w0 && echo && echo END_B64' \
-    | sed -n '/BEGIN_B64/,/END_B64/p' | sed '1d;$d' | tr -d '\r\n' | base64 -d | tar xzf - -C "$LOCAL_RESULTS"
+  # pack on the host, move it in 1 MB pieces, each checksum-verified and retried
+  # (one big SSM reply once came back empty and fetch silently kept the old copy)
+  LIST=$(host 300 'cd ~ && tar czf /tmp/results.tgz results && rm -f /tmp/results.part.* && split -b 1000000 /tmp/results.tgz /tmp/results.part. && md5sum /tmp/results.tgz /tmp/results.part.*')
+  WANT=$(echo "$LIST" | awk '$2=="/tmp/results.tgz"{print $1}')
+  : > "$TMP/results.tgz"
+  for f in $(echo "$LIST" | awk '$2 ~ /results.part/{print $2}'); do
+    PW=$(echo "$LIST" | awk -v f="$f" '$2==f{print $1}'); ok=
+    for try in 1 2 3; do
+      host 300 "echo BEGIN_B64; base64 $f; echo END_B64" | sed -n '/BEGIN_B64/,/END_B64/p' | sed '1d;$d' | tr -d '\r' | base64 -d > "$TMP/part" 2>/dev/null
+      PG=$(md5 -q "$TMP/part" 2>/dev/null || md5sum "$TMP/part" | cut -d' ' -f1)
+      [ "$PG" = "$PW" ] && { ok=1; break; }
+    done
+    [ -n "$ok" ] || { echo "FETCH FAILED: piece $f did not arrive intact after 3 tries; local results NOT changed"; exit 1; }
+    cat "$TMP/part" >> "$TMP/results.tgz"; printf .
+  done; echo
+  GOT=$(md5 -q "$TMP/results.tgz" 2>/dev/null || md5sum "$TMP/results.tgz" | cut -d' ' -f1)
+  [ -n "$WANT" ] && [ "$GOT" = "$WANT" ] || { echo "FETCH FAILED: checksum mismatch; local results NOT changed"; exit 1; }
+  tar xzf "$TMP/results.tgz" -C "$LOCAL_RESULTS"
   N=$(wc -l < "$LOCAL_RESULTS/results/full_rq1.jsonl" | tr -d ' ')
-  echo "DONE: $N runs copied to $LOCAL_RESULTS"
+  echo "DONE (checksum verified): $N runs in $LOCAL_RESULTS/results/full_rq1.jsonl"
   ;;
+
+
 table)
   git -C "$REPO" show "$BRANCH:ic/bench/analyze.py" > "$TMP/analyze.py"
   python3 "$TMP/analyze.py" "$LOCAL_RESULTS/results/full_rq1.jsonl"
