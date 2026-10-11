@@ -6,6 +6,7 @@ A guide for Shahesta and Nour to everything built and run so far, and what comes
 
 | # | Chapter | What you'll learn |
 |---|---|---|
+| 0 | [**The decision (read first)**](00-decision.md) | What we're doing, what we dropped, the next 14 days |
 | 1 | [The big picture](01-big-picture.md) | The problem, our idea in one sentence, the glossary |
 | 2 | [Phase 1: the demo system](02-phase1-demo.md) | What Incident Commander does: console, OPA, verification, evidence chain |
 | 3 | [The decision rule](03-decision-rule.md) | How the rule chooses checks and when it stops, with a worked example; rule v1 vs v2 |
