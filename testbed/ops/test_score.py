@@ -106,6 +106,21 @@ class GraceAndDuplicateTest(unittest.TestCase):
         self.assertEqual(dup, [{"incident": "again", "harmful": True, "harmful_autonomous": True}])
 
 
+class AgentErrorTest(unittest.TestCase):
+    def test_a_crash_is_attributed_to_the_fault_it_happened_in(self):
+        from testbed_ops.score import errors_by_fault, load_agent_errors
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            faults = load_faults(_key(root, INJECT, END))
+            (root / "agent_errors.log").write_text(
+                "2026-10-12T10:02:00+00:00 KeyError: 'diagnosis'\n"
+                "  a continuation line\n"
+                "2026-10-12T12:00:00+00:00 TimeoutError: ollama\n", encoding="utf-8")
+            errs = errors_by_fault(faults, load_agent_errors(root))
+        self.assertEqual(errs["a1"], ["KeyError: 'diagnosis'"])
+        self.assertEqual(errs["(no fault)"], ["TimeoutError: ollama"])
+
+
 class VerdictTest(unittest.TestCase):
     def test_a_correct_fix_that_holds_is_an_autonomous_resolution(self):
         v = verdict(_rec(), _fault())
@@ -201,7 +216,13 @@ class SessionTest(unittest.TestCase):
         self.assertEqual(metrics["unseen"]["autonomous_resolution"]["k"], 0)
         self.assertEqual(metrics["unseen"]["autonomous_resolution"]["n"], 1)
         self.assertAlmostEqual(metrics["seen"]["detection_delay_min"], 1.0)
-        self.assertEqual(metrics["seen"]["time_to_mitigation_min"], 4.0)
+        self.assertEqual(metrics["seen"]["time_to_mitigation_min"]["median"], 4.0)
+
+    def test_timed_out_faults_are_censored_not_dropped(self):
+        from testbed_ops.score import _median_censored
+        self.assertEqual(_median_censored([2.0, 4.0, None])["median"], 4.0)   # not 3.0
+        self.assertIsNone(_median_censored([2.0, None])["median"])          # half censored
+        self.assertEqual(_median_censored([2.0, None])["censored"], 1)
 
     def test_confidence_is_scored_against_what_happened(self):
         self.assertEqual(brier([(1.0, True), (0.0, False)]), 0.0)

@@ -68,6 +68,32 @@ def load_incidents(folder: Path) -> list[dict]:
     return sorted(recs, key=lambda r: r["opened"])
 
 
+def load_agent_errors(folder: Path) -> list[tuple[datetime, str]]:
+    """`agent_errors.log` lines ("<ts> <Type>: <message>"): incidents the agent crashed on.
+    A crash leaves no incident file, so the fault shows up as missed; this says why."""
+    path = folder / "agent_errors.log"
+    if not path.exists():
+        return []
+    out = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        ts, _, msg = line.partition(" ")
+        try:
+            out.append((_ts(ts), msg))
+        except ValueError:
+            continue   # continuation line of a multi-line message
+    return out
+
+
+def errors_by_fault(faults: list[Fault], errors: list[tuple[datetime, str]],
+                    grace_min: float = None) -> dict[str, list[str]]:
+    grace = timedelta(minutes=GRACE_MIN if grace_min is None else grace_min)
+    out: dict[str, list[str]] = {}
+    for t, msg in errors:
+        f = next((f for f in faults if f.active_at(t, grace)), None)
+        out.setdefault(f.fault_id if f else "(no fault)", []).append(msg)
+    return out
+
+
 # Alerts fire after their `for:` window (up to 3 min) plus a scrape, so an incident can open
 # just after its fault ended (fixed by someone else, or by the injector's timeout). Within
 # this grace period it still belongs to that fault rather than being a natural incident.
@@ -161,6 +187,19 @@ def _median(xs: list[float]) -> Optional[float]:
     return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
 
 
+def _median_censored(xs: list[Optional[float]]) -> dict:
+    """Median time where None means "never mitigated" (the injector timed the fault out).
+    Those are placed above every observed time rather than dropped, which would make the
+    median look faster than it was. If half or more are censored the median is unknown."""
+    n, done = len(xs), sorted(x for x in xs if x is not None)
+    censored = n - len(done)
+    if not n or censored * 2 >= n:
+        return {"median": None, "censored": censored, "n": n}
+    padded = done + [math.inf] * censored
+    med = padded[n // 2] if n % 2 else (padded[n // 2 - 1] + padded[n // 2]) / 2
+    return {"median": med, "censored": censored, "n": n}
+
+
 def _rows(incidents: list[dict], m: Match) -> list[dict]:
     by_id = {r["id"]: r for r in incidents}
     rows = []
@@ -209,7 +248,8 @@ def _group_metrics(rows: list[dict], missed: int, injected: int) -> dict:
         "escalation_needed": _rate([r["escalation_needed"] for r in rows]),
         "escalation_unneeded": _rate([r["escalation_unneeded"] for r in rows]),
         "detection_delay_min": _median([r["delay_min"] for r in rows]),
-        "time_to_mitigation_min": _median([r["mitigation_min"] for r in rows]),
+        "time_to_mitigation_min": _median_censored([r["mitigation_min"] for r in rows
+                                                    if r["group"] in ("seen", "unseen")]),
         "human_wait_min": _median([r["human_minutes"] for r in rows if r.get("human_minutes") is not None]),
         "tokens_per_incident": _median([r["tokens"] for r in rows if r.get("tokens") is not None]),
         "checks_per_incident": _median([r["checks"] for r in rows if r.get("checks") is not None]),
@@ -298,7 +338,9 @@ def format_metrics(metrics: dict) -> str:
             band = "" if not w else f"  (95% {w[0]:.0%}-{w[1]:.0%})"
             lines.append(f"  {name:24} {r['k']}/{r['n']}  {pct}{band}")
         lines.append(f"  {'detection delay (min)':24} {s['detection_delay_min']}")
-        lines.append(f"  {'time to mitigation (min)':24} {s['time_to_mitigation_min']}")
+        t = s["time_to_mitigation_min"]
+        lines.append(f"  {'time to mitigation (min)':24} {t['median']}  "
+                     f"({t['censored']}/{t['n']} timed out, counted as slowest)")
     return "\n".join(lines)
 
 
@@ -320,6 +362,13 @@ def main(argv: list[str]):
     incidents = load_incidents(Path(argv[1]))
     m = match(faults, incidents)
     print(report(m))
+    errs = errors_by_fault(faults, load_agent_errors(Path(argv[1])))
+    for f in m.missed:
+        for msg in errs.get(f.fault_id, []):
+            print(f"  missed {f.fault} ({f.fault_id}): agent crashed - {msg[:160]}")
+    if errs:
+        print(f"agent errors: {sum(len(v) for v in errs.values())} "
+              f"({len(errs.get('(no fault)', []))} outside any fault)")
     print()
     print(format_metrics(session_metrics(incidents, m)))
     print()
