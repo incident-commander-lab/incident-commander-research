@@ -65,10 +65,13 @@ def answer_confidence(r: dict) -> Optional[float]:
     post, hyps = r.get("posteriors"), r.get("hypotheses")
     if not post or not hyps:
         return None
+    return confidence(post, hyps, r["task"], parse_submission(r.get("submission"), r["task"]))
+
+
+def confidence(post: dict, hyps: dict, task: str, ans) -> Optional[float]:
+    """P(answer is right) under posterior `post`; `ans` as parse_submission returns it."""
     service = {hid: (hyps.get(hid) or {}).get("service") for hid in post}
     p_fault = sum(p for hid, p in post.items() if service[hid] is not None)
-    task = r["task"]
-    ans = parse_submission(r.get("submission"), task)
     if task == "detection":
         if ans not in ("Yes", "No"):
             return 0.0
