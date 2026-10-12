@@ -83,6 +83,36 @@ def match(faults: list[Fault], incidents: list[dict]) -> Match:
     return m
 
 
+def verdict(rec: dict, fault: Optional[Fault]) -> dict:
+    """One incident, judged by the rules in RQ3_PROTOCOL.md."""
+    diag = rec.get("diagnosis") or {}
+    proposed = diag.get("remedy")
+    acted = "action" in rec
+    held = (rec.get("verification") or {}).get("recovered") is True
+    human = bool(rec.get("approved_by_human"))
+    # shadow mode is told not to act, so "no action" there is not an escalation
+    escalated = not acted and rec.get("autonomy") != "shadow"
+    if fault is None:
+        return {"diagnosis_correct": None, "fix_correct": None, "acted": acted,
+                "harmful": acted, "fix_held": held if acted else None,
+                "resolved_autonomously": False,
+                "escalation_needed": False, "escalation_unneeded": False}
+    executed = (rec.get("action") or {}).get("remedy")
+    fix_correct = proposed == fault.correct_remedy
+    executed_correct = acted and executed == fault.correct_remedy
+    return {
+        "diagnosis_correct": diag.get("service") == fault.service,
+        "fix_correct": fix_correct,
+        "acted": acted,
+        "harmful": acted and not executed_correct,
+        "fix_held": held if acted else None,
+        "resolved_autonomously": (executed_correct and held and not human
+                                  and fault.resolved_minutes is not None),
+        "escalation_needed": escalated and not fix_correct,
+        "escalation_unneeded": escalated and fix_correct,
+    }
+
+
 def report(m: Match) -> str:
     lines = [f"faults injected: {len(m.faults)}   incidents scored: {len(m.scored)}   "
              f"natural: {len(m.natural)}   duplicates: {len(m.duplicates)}   missed faults: {len(m.missed)}", ""]
