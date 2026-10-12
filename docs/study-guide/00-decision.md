@@ -24,7 +24,7 @@
 
 | When | What | Who |
 |---|---|---|
-| 12–25 Oct | **Live system, minimal version** (see chapter 9): week 1 = one stream (Wikipedia) + collector + Redis + worker + Postgres + Prometheus metrics + Grafana; week 2 = 4 injected faults with a sealed ground-truth log + Alertmanager → agent (diagnosis first, then reversible actions behind OPA) + Slack escalation + recorder for replay | Nour leads the app, Shahesta the data pipeline + agent wiring, Claude builds alongside |
+| 12–25 Oct | **Live system, minimal version** (see chapter 9): week 1 = one stream (Wikipedia) + collector + Redis + worker + Postgres + Prometheus metrics + Grafana; week 2 = 4 injected faults with a sealed ground-truth log + Alertmanager → agent (diagnosis first, then reversible actions behind OPA) + Slack escalation + recorder for replay | Shahesta + Claude build the system (week 1 done 12 Oct: `testbed/`); Nour owns evaluation (below) |
 | when the laptop is free | Resume Night 5 (paused 12 Oct at 543 runs; ~4 h left) → `fetch`, audit, charts → Night 6 (~10–12 h) | Shahesta |
 | 12–14 Oct | **Upgrade Paradox, Experiment 1 (model ladder):** qwen3 0.6B / 1.7B / 4B / 8B / 14B write hypotheses for the 73 problems; offline replay against the full "every check" readings; rule v1 vs v2 | Claude + Shahesta (laptop only, no AWS) |
 | 14 Oct | **Go / no-go:** under rule v1, does accuracy fail to rise with model size, *and* does v2 fix it? | Both |
@@ -32,6 +32,12 @@
 | this week | Email the university tech-transfer office about a confidential invention disclosure | Shahesta |
 | 19–25 Oct | Night 6 results into Paper 1; draft Sections 1–3 (RQ1/RQ2 written, RQ3 section waits for live results) | Both |
 | 26 Oct → | Live pilot sessions on AWS (4–6 h each), then the RQ3 experiment: rule v2 (frozen) vs plain LLM agent vs always-escalate on the same replayed traffic and faults | Both |
+
+## Nour: evaluation lead (agreed 12 Oct)
+
+1. **Now, offline, on existing runs:** confidence calibration and selective prediction (risk–coverage curves: accuracy if each method may abstain below a confidence threshold) for rule v1/v2 (posterior), LLM-picks (posterior), ReAct (confidence elicited post hoc from its saved trajectory, no re-run). Final numbers after Night 6.
+2. **Now, offline:** evidence-failure test by replay: mask a share of check readings as unavailable and measure how accuracy, confidence and abstention degrade per method.
+3. **RQ3:** the evaluation protocol and the scorer against the sealed ground-truth log: autonomous resolution, correct diagnosis, harmful actions, escalations (needed vs not), time to mitigation, human minutes, calibration. Live failure tests use reversible faults only (kill an exporter, block a stream).
 
 ## Go / no-go rule for the Upgrade Paradox (set *before* seeing results)
 
