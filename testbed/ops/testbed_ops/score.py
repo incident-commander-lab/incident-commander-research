@@ -13,7 +13,7 @@ import json
 import math
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -29,8 +29,8 @@ class Fault:
     ended_by: Optional[str] = None
     resolved_minutes: Optional[float] = None
 
-    def active_at(self, t: datetime) -> bool:
-        return self.injected <= t and (self.ended is None or t <= self.ended)
+    def active_at(self, t: datetime, grace: timedelta = timedelta(0)) -> bool:
+        return self.injected <= t and (self.ended is None or t <= self.ended + grace)
 
 
 @dataclass
@@ -38,6 +38,7 @@ class Match:
     faults: list[Fault]
     scored: dict[str, Fault] = field(default_factory=dict)   # incident id -> its fault
     duplicates: list[str] = field(default_factory=list)      # later incidents on an already-scored fault
+    duplicate_of: dict[str, Fault] = field(default_factory=dict)  # duplicate incident id -> its fault
     natural: list[str] = field(default_factory=list)         # incidents with no active fault
     missed: list[Fault] = field(default_factory=list)        # faults with no incident
 
@@ -67,16 +68,26 @@ def load_incidents(folder: Path) -> list[dict]:
     return sorted(recs, key=lambda r: r["opened"])
 
 
-def match(faults: list[Fault], incidents: list[dict]) -> Match:
+# Alerts fire after their `for:` window (up to 3 min) plus a scrape, so an incident can open
+# just after its fault ended (fixed by someone else, or by the injector's timeout). Within
+# this grace period it still belongs to that fault rather than being a natural incident.
+GRACE_MIN = 5.0
+
+
+def match(faults: list[Fault], incidents: list[dict], grace_min: float = GRACE_MIN) -> Match:
     m = Match(faults)
     taken: set[str] = set()
+    grace = timedelta(minutes=grace_min)
     for rec in incidents:
         t = _ts(rec["opened"])
-        fault = next((f for f in faults if f.active_at(t)), None)
+        # a fault still active wins over one that has just ended
+        fault = (next((f for f in faults if f.active_at(t)), None)
+                 or next((f for f in reversed(faults) if f.active_at(t, grace)), None))
         if fault is None:
             m.natural.append(rec["id"])
         elif fault.fault_id in taken:
             m.duplicates.append(rec["id"])
+            m.duplicate_of[rec["id"]] = fault
         else:
             taken.add(fault.fault_id)
             m.scored[rec["id"]] = fault
@@ -157,7 +168,7 @@ def _rows(incidents: list[dict], m: Match) -> list[dict]:
         rec = by_id[iid]
         v = verdict(rec, fault)
         usage = rec.get("llm_usage") or {}
-        rows.append({**v, "group": "seen" if fault.fault in SEEN else "unseen",
+        rows.append({**v, "group": "seen" if fault.fault in SEEN else "unseen", "incident": iid,
                      "delay_min": (_ts(rec["opened"]) - fault.injected).total_seconds() / 60,
                      "mitigation_min": fault.resolved_minutes,
                      "p_remedy": (rec.get("diagnosis") or {}).get("p_remedy"),
@@ -166,10 +177,17 @@ def _rows(incidents: list[dict], m: Match) -> list[dict]:
                      "checks": (rec.get("investigation") or {}).get("checks_paid"),
                      "seconds": rec.get("seconds"),
                      "human_minutes": rec.get("human_minutes")})
+    # Duplicates are not scored as incidents, but an action on one is still an action:
+    # a second rollback during the same fault rolls back past the good release.
+    for iid, fault in m.duplicate_of.items():
+        v = verdict(by_id[iid], fault)
+        if v["acted"]:
+            rows.append({**v, "group": "duplicate", "incident": iid, "delay_min": None,
+                         "mitigation_min": None, "p_remedy": None})
     for iid in m.natural:
         rec = by_id[iid]
         v = verdict(rec, None)
-        rows.append({**v, "group": "natural", "delay_min": None, "mitigation_min": None,
+        rows.append({**v, "group": "natural", "incident": iid, "delay_min": None, "mitigation_min": None,
                      "p_remedy": (rec.get("diagnosis") or {}).get("p_remedy")})
     return rows
 
@@ -212,6 +230,10 @@ def session_metrics(incidents: list[dict], m: Match) -> dict:
     for g in ("seen", "unseen", "natural"):
         out[g] = _group_metrics([r for r in rows if r["group"] == g],
                                 missed.get(g, 0), injected.get(g, 0))
+    # actions on duplicate incidents: listed, not folded into the per-incident rates
+    out["duplicate_actions"] = [{"incident": r["incident"], "harmful": r["harmful"],
+                                 "harmful_autonomous": r["harmful_autonomous"]}
+                                for r in rows if r["group"] == "duplicate"]
     return out
 
 
@@ -262,6 +284,11 @@ def report(m: Match) -> str:
 def format_metrics(metrics: dict) -> str:
     lines = []
     for g, s in metrics.items():
+        if g == "duplicate_actions":
+            for d in s:
+                lines.append(f"action on duplicate incident {d['incident']}: "
+                             f"{'HARMFUL' if d['harmful'] else 'correct remedy'}")
+            continue
         lines.append(f"== {g} ==")
         for name in ("diagnosis_accuracy", "fix_accuracy", "autonomous_resolution", "harmful_autonomous",
                      "harmful_action", "escalated", "escalation_needed", "escalation_unneeded"):

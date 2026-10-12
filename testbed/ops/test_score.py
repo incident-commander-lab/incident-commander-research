@@ -75,6 +75,37 @@ def _rec(**kw) -> dict:
     return rec
 
 
+def _key(root: Path, *events) -> Path:
+    key = root / "ground_truth.jsonl"
+    key.write_text("\n".join(json.dumps(e) for e in events), encoding="utf-8")
+    return key
+
+
+INJECT = {"ts": "2026-10-12T10:00:00+00:00", "event": "inject", "fault_id": "a1",
+          "fault": "bad_release_worker", "service": "worker", "correct_remedy": "rollback_release:worker"}
+END = {"ts": "2026-10-12T10:04:00+00:00", "event": "end", "fault_id": "a1", "ended_by": "timeout"}
+
+
+class GraceAndDuplicateTest(unittest.TestCase):
+    def test_an_incident_just_after_the_fault_ended_still_belongs_to_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            faults = load_faults(_key(Path(d), INJECT, END))
+        late = [{"id": "late", "opened": "2026-10-12T10:07:00+00:00"}]
+        self.assertEqual(list(match(faults, late).scored), ["late"])
+        self.assertEqual(match(faults, late, grace_min=0).natural, ["late"])
+        far = [{"id": "far", "opened": "2026-10-12T10:30:00+00:00"}]
+        self.assertEqual(match(faults, far).natural, ["far"])
+
+    def test_a_wrong_action_on_a_duplicate_incident_is_reported(self):
+        with tempfile.TemporaryDirectory() as d:
+            faults = load_faults(_key(Path(d), INJECT, END))
+        first = _rec(id="first", opened="2026-10-12T10:01:00+00:00")
+        again = _rec(id="again", opened="2026-10-12T10:03:30+00:00", action={"remedy": "restart:api"})
+        m = match(faults, [first, again])
+        dup = session_metrics([first, again], m)["duplicate_actions"]
+        self.assertEqual(dup, [{"incident": "again", "harmful": True, "harmful_autonomous": True}])
+
+
 class VerdictTest(unittest.TestCase):
     def test_a_correct_fix_that_holds_is_an_autonomous_resolution(self):
         v = verdict(_rec(), _fault())
