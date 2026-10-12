@@ -1,9 +1,17 @@
 // Worker: consumes the Redis stream in a consumer group, writes events to Postgres in
 // batches, and acknowledges them. Lag (events waiting) is exported for alerting.
 import os from 'node:os';
-import { cfg, log, metrics, pgPool, redis, serveMetrics, sleep } from './common.js';
+import { cfg, log, metrics, pgPool, redis, release, serveMetrics, sleep } from './common.js';
 
 const BATCH = Number(process.env.BATCH_SIZE || 200);
+// Refuse to start on a bad config (as a real service would): an invalid release makes
+// the container exit, and the restart policy turns that into a crash loop.
+if (!Number.isInteger(BATCH) || BATCH < 1) {
+  log('error', 'invalid config: BATCH_SIZE must be a positive integer', { value: process.env.BATCH_SIZE, release: release.version });
+  process.exit(1);
+}
+// A defect shipped in a release: the insert names a column that does not exist.
+const COLUMN = process.env.DELTA_COLUMN || 'delta';
 const CONSUMER = process.env.CONSUMER_NAME || os.hostname();
 
 const processed = new metrics.Counter({ name: 'pulse_events_processed_total', help: 'Events stored in Postgres', labelNames: ['source'] });
@@ -43,11 +51,11 @@ async function store(entries) {
     m.bot === 'true', m.delta === '' ? null : Number(m.delta)]);
   const values = rows.map((_, i) => `($${i * 8 + 1},$${i * 8 + 2},$${i * 8 + 3},$${i * 8 + 4},$${i * 8 + 5},$${i * 8 + 6},$${i * 8 + 7},$${i * 8 + 8})`).join(',');
   await pool.query(
-    `INSERT INTO edits (event_id, ts, source, kind, wiki, title, bot, delta) VALUES ${values} ON CONFLICT (event_id) DO NOTHING`,
+    `INSERT INTO edits (event_id, ts, source, kind, wiki, title, bot, ${COLUMN}) VALUES ${values} ON CONFLICT (event_id) DO NOTHING`,
     rows.flat());
 }
 
-log('info', 'worker started', { consumer: CONSUMER, batch: BATCH });
+log('info', 'worker started', { consumer: CONSUMER, batch: BATCH, release: release.version });
 for (;;) {
   let res;
   try {

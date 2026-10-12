@@ -1,0 +1,4 @@
+*
+!ic/
+!testbed/ops/testbed_ops/
+**/__pycache__

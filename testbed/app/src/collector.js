@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import readline from 'node:readline';
-import { cfg, log, metrics, redis, serveMetrics, sleep } from './common.js';
+import { cfg, log, metrics, redis, release, serveMetrics, sleep } from './common.js';
 import { createSSEParser, normalizeWikimedia } from './sources.js';
 
 const URL_ = process.env.WIKIMEDIA_URL || 'https://stream.wikimedia.org/v2/stream/recentchange';
@@ -76,7 +76,7 @@ async function live() {
       const res = await fetch(URL_, { headers });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       isConnected = true; connected.set({ source: 'wikipedia' }, 1); backoff = 1000;
-      log('info', 'connected', { source: 'wikipedia', resume: Boolean(lastId) });
+      log('info', 'connected', { source: 'wikipedia', resume: Boolean(lastId), release: release.version });
       const feed = createSSEParser();
       const dec = new TextDecoder();
       for await (const chunk of res.body) {

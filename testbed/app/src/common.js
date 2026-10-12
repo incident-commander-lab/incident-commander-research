@@ -1,8 +1,21 @@
 // Shared plumbing: config, Redis, Postgres, metrics server, logging.
+import fs from 'node:fs';
 import http from 'node:http';
 import pg from 'pg';
 import { createClient } from 'redis';
 import client from 'prom-client';
+
+// A "release" is the config a service was deployed with: /releases/<service>.json
+// ({ "version": "1.0.0", "env": { ... } }). Deploys and rollbacks rewrite that file and
+// restart the container, the way a config-driven deploy pipeline would. Its env
+// overrides the container's environment.
+export const release = (() => {
+  const file = process.env.RELEASE_FILE;
+  if (!file || !fs.existsSync(file)) return { version: 'unreleased', env: {} };
+  const r = JSON.parse(fs.readFileSync(file, 'utf8'));
+  Object.assign(process.env, r.env || {});
+  return r;
+})();
 
 export const cfg = {
   redisUrl: process.env.REDIS_URL || 'redis://localhost:6379',
@@ -17,6 +30,8 @@ export const cfg = {
 
 client.collectDefaultMetrics({ labels: { service: cfg.service } });
 export const metrics = client;
+new client.Gauge({ name: 'pulse_release_info', help: 'Deployed release (value is always 1)', labelNames: ['version'] })
+  .set({ version: release.version }, 1);
 
 // One JSON line per log event: easy for Loki or `kubectl logs | jq`, and for the agent's log checks.
 export function log(level, msg, fields = {}) {

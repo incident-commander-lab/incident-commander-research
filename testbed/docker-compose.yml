@@ -34,6 +34,7 @@ services:
     <<: *app
     environment:
       <<: *appenv
+      RELEASE_FILE: /releases/collector.json
       ROLE: collector
       SERVICE_NAME: collector
       METRICS_PORT: "9101"
@@ -41,12 +42,13 @@ services:
       USER_AGENT: ${USER_AGENT:-pulse-testbed/0.1 (research test bed)}
       REPLAY_FILE: ${REPLAY_FILE:-}
       REPLAY_SPEED: ${REPLAY_SPEED:-1}
-    volumes: ["./recordings:/recordings"]
+    volumes: ["./recordings:/recordings", "releases:/releases:ro"]
     user: root   # writes recordings to the bind mount
 
   worker:
     <<: *app
-    environment: { <<: *appenv, ROLE: worker, SERVICE_NAME: worker, METRICS_PORT: "9102" }
+    environment: { <<: *appenv, ROLE: worker, SERVICE_NAME: worker, METRICS_PORT: "9102", RELEASE_FILE: /releases/worker.json }
+    volumes: ["releases:/releases:ro"]
 
   api:
     <<: *app
@@ -86,5 +88,51 @@ services:
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     ports: ["${GRAFANA_PORT:-3301}:3000"]
 
+  # ---------------------------------------------------------------- week 2: faults, agent, policy
+  opa:
+    image: openpolicyagent/opa:1.4.0-static
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "/policy"]
+    volumes: ["./policy:/policy:ro"]
+
+  chaos:
+    build: { context: .., dockerfile: testbed/ops/Dockerfile }
+    command: ["python", "-m", "testbed_ops.chaos", "${CHAOS_MODE:-serve}"]
+    environment:
+      CHAOS_MEAN_GAP_MIN: ${CHAOS_MEAN_GAP_MIN:-30}
+      FAULT_TIMEOUT_MIN: ${FAULT_TIMEOUT_MIN:-20}
+      CHAOS_SEED: ${CHAOS_SEED:-0}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - releases:/releases
+      - state:/state
+      - sealed:/sealed          # the answer key: only the injector mounts it
+    depends_on: [postgres, redis]
+    restart: unless-stopped
+
+  agent:
+    build: { context: .., dockerfile: testbed/ops/Dockerfile }
+    command: ["uvicorn", "testbed_ops.agent:app", "--host", "0.0.0.0", "--port", "8080"]
+    environment:
+      AUTONOMY: ${AUTONOMY:-shadow}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      VERIFY_SECONDS: ${VERIFY_SECONDS:-120}
+      IC_PROVIDER: openrouter_models
+      IC_OPENROUTER_MODELS: ollama:${AGENT_MODEL:-qwen3:8b}
+      IC_STRICT_PROVIDER: "1"
+      IC_OLLAMA_BASE_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/v1}
+      IC_LLM_TIMEOUT: "300"
+    extra_hosts: ["host.docker.internal:host-gateway"]   # Linux; Docker Desktop has it already
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - releases:/releases
+      - state:/state
+      - ./incidents:/incidents
+    ports: ["${AGENT_PORT:-8380}:8080"]
+    depends_on: [opa, prometheus]
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  releases:
+  state:
+  sealed:

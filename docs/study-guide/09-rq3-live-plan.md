@@ -1,6 +1,10 @@
 # 9. RQ3: the live system (plan)
 
-**Status: planned, not built.** This is the build plan for the next phase, from our mentor's suggestion: "run it live, with Prometheus, on a real Node.js app".
+**Status (12 Oct): built and running.** Week 1 (the app on real Wikipedia traffic) and week 2 (faults with a sealed answer key, the agent, OPA, verification, escalation) are done: see [`testbed/README.md`](../../testbed/README.md) for how to run it, including on Nour's machine. The plan below is the original design; the "What we compare" and "What we measure" sections are the RQ3 experiment still to run.
+
+![The live test bed during the shakedown: each spike in the worker's backlog is an injected fault, each drop a recovery](img/testbed-grafana.png)
+
+**First end-to-end result (shakedown, not the experiment):** a bad worker release was injected without telling the agent. Within about 4 minutes, the alert fired, the agent ran 3 checks and 1 LLM call, judged "roll back the worker" 97% likely to work, got OPA's approval, rolled back, and verified recovery from fresh telemetry. A database lock was localized correctly but escalated with the right fix proposed (confidence 0.32 < 0.78).
 
 ## Why live, if the benchmark already ran real apps?
 
