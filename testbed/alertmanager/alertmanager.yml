@@ -1,0 +1,12 @@
+# Week 2 wires `agent` to the Incident Commander webhook; until then alerts are only visible in the UI.
+route:
+  receiver: agent
+  group_by: [alertname]
+  group_wait: 10s
+  group_interval: 1m
+  repeat_interval: 1h
+receivers:
+  - name: agent
+    webhook_configs:
+      - url: http://agent:8080/alert
+        send_resolved: true
