@@ -22,6 +22,13 @@ docker compose up -d
 say "Waiting for Grafana..."
 for _ in $(seq 1 60); do curl -sf -m 2 "http://localhost:${GRAFANA_PORT:-3301}/api/health" >/dev/null && break; sleep 2; done
 
+say "Waiting for the first minute of live data (so the graphs are not empty)..."
+for _ in $(seq 1 45); do
+  curl -s -m 3 -G "http://localhost:${PROM_PORT:-9390}/api/v1/query" \
+       --data-urlencode 'query=sum(rate(pulse_events_processed_total[1m])) > 0' | grep -q '"value"' && break
+  sleep 3
+done
+
 [ -z "$NO_OPEN" ] && open "http://localhost:${GRAFANA_PORT:-3301}/d/pulse/pulse-test-bed?orgId=1&from=now-15m&to=now&refresh=10s"
 [ -z "$NO_OPEN" ] && open "https://ic-live-update.vercel.app"
 say "Running. Live links in the document now work."
