@@ -116,6 +116,25 @@ class VerdictTest(unittest.TestCase):
         v = verdict(_rec(approved_by_human="2026-10-12T10:03:00+00:00"), _fault())
         self.assertFalse(v["resolved_autonomously"])
 
+    def test_an_approved_fix_is_still_an_escalation(self):
+        v = verdict(_rec(approved_by_human="2026-10-12T10:03:00+00:00"), _fault())
+        self.assertTrue(v["escalated"])
+        self.assertTrue(v["escalation_unneeded"])   # the proposed fix was right
+
+    def test_a_wrong_fix_a_human_approved_is_not_the_agents_harm(self):
+        v = verdict(_rec(action={"remedy": "restart:api"},
+                         approved_by_human="2026-10-12T10:03:00+00:00"), _fault())
+        self.assertTrue(v["harmful"])
+        self.assertFalse(v["harmful_autonomous"])
+        self.assertTrue(verdict(_rec(action={"remedy": "restart:api"}), _fault())["harmful_autonomous"])
+
+    def test_a_policy_denial_is_an_escalation(self):
+        rec = _rec(policy={"allow": False})
+        del rec["action"]
+        del rec["verification"]
+        self.assertTrue(verdict(rec, _fault())["escalated"])
+        self.assertFalse(verdict(dict(rec, autonomy="shadow"), _fault())["escalated"])
+
 
 class SessionTest(unittest.TestCase):
     def test_a_missed_fault_counts_against_autonomous_resolution(self):
