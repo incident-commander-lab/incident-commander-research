@@ -69,7 +69,8 @@ services:
     image: prom/prometheus:v2.55.1
     volumes:
       - ./prometheus:/etc/prometheus:ro
-    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.retention.time=15d"]
+      - promdata:/prometheus      # keep metric history across stop/start
+    command: ["--config.file=/etc/prometheus/prometheus.yml", "--storage.tsdb.path=/prometheus", "--storage.tsdb.retention.time=15d"]
     ports: ["${PROM_PORT:-9390}:9090"]
 
   alertmanager:
@@ -133,6 +134,7 @@ services:
 
 volumes:
   pgdata:
+  promdata:
   releases:
   state:
   sealed:
