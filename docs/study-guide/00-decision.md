@@ -8,6 +8,7 @@
 | **Paper 2** | **The Upgrade Paradox**: a smarter LLM can make an "LLM proposes, Bayes decides" system *worse* | Our own result (14B: 45% → 26%), with a diagnosed mechanism and a fix (rule v2). Nothing close found in ~12 searches. Publishable without touching the patent | **Next experiment** |
 | **Patent** | **Autonomy Drift** (with re-tests inside it) | The only idea where the specific mechanism wasn't found in the prior-art screen | Confidential. One meeting with tech-transfer, nothing else until then |
 | **Demo** | The RQ3 live system | Needed by the patent idea and for a strong demo later | **Parked** until Paper 2's result is in |
+| **Startup** | "Earning Autonomy": an AI SRE layer that decides when *not* to act, sold to teams that can't hand production to a black box (regulated/private-cloud companies, e.g. Egypt's banks and telcos under PDPL) | Papers = credibility, patent = protection, live system = demo. Starting it before those exist means pitching claims we can't back | **Later**: decide after Paper 1 is submitted and the tech-transfer meeting |
 
 ## Dropped or parked (and why)
 
@@ -23,7 +24,7 @@
 
 | When | What | Who |
 |---|---|---|
-| 12 Oct (morning) | Night 5 done → `fetch`, audit, charts → start Night 6 | Shahesta |
+| when the laptop is free | Resume Night 5 (paused 12 Oct at 543 runs; ~4 h left) → `fetch`, audit, charts → Night 6 (~10–12 h) | Shahesta |
 | 12–14 Oct | **Upgrade Paradox, Experiment 1 (model ladder):** qwen3 0.6B / 1.7B / 4B / 8B / 14B write hypotheses for the 73 problems; offline replay against the full "every check" readings; rule v1 vs v2 | Claude + Shahesta (laptop only, no AWS) |
 | 14 Oct | **Go / no-go:** under rule v1, does accuracy fail to rise with model size, *and* does v2 fix it? | Both |
 | 15–18 Oct | If go: Experiment 2 (the specificity dial) + a second model family. If no-go: write Paper 1 only | Both |
