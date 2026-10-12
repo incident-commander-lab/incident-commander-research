@@ -4,7 +4,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from testbed_ops.score import Fault, load_faults, load_incidents, match, verdict
+from testbed_ops.score import (Fault, brier, load_faults, load_incidents,
+                               match, reliability, session_metrics, verdict)
 from datetime import datetime, timezone
 
 
@@ -114,6 +115,50 @@ class VerdictTest(unittest.TestCase):
     def test_a_human_approval_is_not_autonomous(self):
         v = verdict(_rec(approved_by_human="2026-10-12T10:03:00+00:00"), _fault())
         self.assertFalse(v["resolved_autonomously"])
+
+
+class SessionTest(unittest.TestCase):
+    def test_a_missed_fault_counts_against_autonomous_resolution(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            key = root / "ground_truth.jsonl"
+            key.write_text("\n".join([
+                json.dumps({"ts": "2026-10-12T10:00:00+00:00", "event": "inject", "fault_id": "a1",
+                            "fault": "bad_release_worker", "service": "worker",
+                            "correct_remedy": "rollback_release:worker"}),
+                json.dumps({"ts": "2026-10-12T10:04:00+00:00", "event": "resolved",
+                            "fault_id": "a1", "minutes": 4.0}),
+                json.dumps({"ts": "2026-10-12T10:04:00+00:00", "event": "end", "fault_id": "a1",
+                            "ended_by": "fixed_before_injector_heal"}),
+                json.dumps({"ts": "2026-10-12T11:00:00+00:00", "event": "inject", "fault_id": "b1",
+                            "fault": "redis_oom", "service": "redis",
+                            "correct_remedy": "restore_redis_maxmemory:redis"}),
+                json.dumps({"ts": "2026-10-12T11:20:00+00:00", "event": "end", "fault_id": "b1",
+                            "ended_by": "timeout"}),
+            ]), encoding="utf-8")
+            inc = root / "incidents"
+            inc.mkdir()
+            (inc / "ok.json").write_text(json.dumps(
+                _rec(id="ok", opened="2026-10-12T10:01:00+00:00",
+                     llm_usage={"input_tokens": 100, "output_tokens": 20, "calls": 1},
+                     investigation={"checks_paid": 3}, seconds=30)), encoding="utf-8")
+            incidents = load_incidents(inc)
+            m = match(load_faults(key), incidents)
+        metrics = session_metrics(incidents, m)
+        self.assertEqual(metrics["seen"]["autonomous_resolution"]["k"], 1)
+        self.assertEqual(metrics["seen"]["autonomous_resolution"]["n"], 1)
+        self.assertEqual(metrics["unseen"]["missed_faults"]["k"], 1)
+        self.assertEqual(metrics["unseen"]["autonomous_resolution"]["k"], 0)
+        self.assertEqual(metrics["unseen"]["autonomous_resolution"]["n"], 1)
+        self.assertAlmostEqual(metrics["seen"]["detection_delay_min"], 1.0)
+        self.assertEqual(metrics["seen"]["time_to_mitigation_min"], 4.0)
+
+    def test_confidence_is_scored_against_what_happened(self):
+        self.assertEqual(brier([(1.0, True), (0.0, False)]), 0.0)
+        self.assertEqual(brier([(1.0, False)]), 1.0)
+        bins = reliability([(0.1, False), (0.95, True)])
+        self.assertEqual(bins[0]["n"], 1)
+        self.assertEqual(bins[-1]["correct"], 1)
 
 
 if __name__ == "__main__":
