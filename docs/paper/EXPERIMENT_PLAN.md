@@ -18,7 +18,7 @@ The model is the instrument. The variable under study is the decision architectu
 |---|---|---|---|
 | **RQ1 (core)** | Does the decision rule beat LLM self-direction at choosing what to observe and when to stop, without losing accuracy? | AIOpsLab, 75 non-mitigation problems | Harness built and piloted |
 | **RQ2** | Does the same rule decide well among acting, holding back and escalating, and does its behaviour shift sensibly with customer impact? | shop-svc: paired incidents (deploy causal / deploy not causal / ambiguous) at several customer-impact levels | To build |
-| **RQ3 (stretch)** | Does cross-source disagreement push the agent to escalate when telemetry is poisoned? | shop-svc with manipulated telemetry | Optional |
+| **RQ3** | On a live system with unannounced faults the rule has never seen, does the frozen rule act safely and escalate when it should? | `testbed/` (live Wikimedia traffic), protocol in [`RQ3_PROTOCOL.md`](RQ3_PROTOCOL.md) | Test bed built; protocol in draft |
 
 ## Hypotheses (stated before the main runs)
 
