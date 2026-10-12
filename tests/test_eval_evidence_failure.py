@@ -31,3 +31,12 @@ def test_masks_are_reproducible():
     a = evaluate([run()], rates=(0.5,), seeds=4)
     b = evaluate([run()], rates=(0.5,), seeds=4)
     assert a == b
+
+
+def test_hiding_one_probe_type_hides_only_that_type():
+    from ic.eval.evidence_failure import by_probe_type
+    rows = by_probe_type([run()])
+    by = {r["hidden"]: r for r in rows}
+    assert set(by) == {"(none)", "pod_health"}
+    assert by["(none)"]["runs_affected"] == 0 and by["pod_health"]["runs_affected"] == 1
+    assert by["(none)"]["accuracy"] == 1.0

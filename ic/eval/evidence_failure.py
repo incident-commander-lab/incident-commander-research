@@ -157,12 +157,62 @@ def plot(table: list[dict], out: Path):
     return path
 
 
+def by_probe_type(rows: list[dict]) -> list[dict]:
+    """Hide every paid reading of ONE probe type (pod_health, log_signature, ...) at a time.
+    If accuracy rises when a type is hidden, readings of that type were pushing the rule
+    toward wrong answers: that is the type to fix (its labelling or its ε)."""
+    gt = ground_truth(rows)
+    runs = [r for r in rows if r["policy"] in POLICIES and r.get("hypotheses") and r.get("trace")]
+    ptype = lambda step: step["probe"].split(":", 1)[0]
+    types = sorted({ptype(s) for r in runs for s in r["trace"] if not s.get("free")})
+    out = []
+    for model in sorted({r.get("model") or "?" for r in runs}):
+        for policy in POLICIES:
+            rs = [r for r in runs if (r.get("model") or "?") == model and r["policy"] == policy]
+            if not rs:
+                continue
+            for t in [None] + types:
+                ok = n = touched = 0
+                for r in rs:
+                    masked = {i for i, s in enumerate(r["trace"]) if not s.get("free") and ptype(s) == t}
+                    touched += bool(masked)
+                    s = score(answer(rebuild(r, masked), r["task"], rule_version(r)), r["task"],
+                              gt[r["problem"]])
+                    if s is not None:
+                        ok, n = ok + s, n + 1
+                out.append({"model": model, "condition": LABEL.get(policy, policy), "policy": policy,
+                            "hidden": t or "(none)", "runs_affected": touched, "scored": n,
+                            "accuracy": ok / n if n else float("nan")})
+    return out
+
+
+def markdown_by_type(table: list[dict]) -> str:
+    lines = ["| model | condition | probe type hidden | runs affected | accuracy | Δ vs nothing hidden |",
+             "|" + "---|" * 6]
+    base = {(r["model"], r["policy"]): r["accuracy"] for r in table if r["hidden"] == "(none)"}
+    for r in table:
+        d = r["accuracy"] - base[(r["model"], r["policy"])]
+        delta = "" if r["hidden"] == "(none)" else f"{d:+.0%}"
+        lines.append(f"| {r['model']} | {r['condition']} | {r['hidden']} | {r['runs_affected']} "
+                     f"| {r['accuracy']:.0%} | {delta} |")
+    return "\n".join(lines)
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("paths", nargs="+")
     ap.add_argument("--seeds", type=int, default=20)
     ap.add_argument("--out", default=None)
+    ap.add_argument("--by-type", action="store_true",
+                    help="hide one probe type at a time instead of a random share")
     args = ap.parse_args()
+    if args.by_type:
+        md = markdown_by_type(by_probe_type(load(args.paths)))
+        print(md)
+        if args.out:
+            Path(args.out).mkdir(parents=True, exist_ok=True)
+            (Path(args.out) / "evidence_by_type.md").write_text(md + "\n", encoding="utf-8")
+        return
     table = evaluate(load(args.paths), seeds=args.seeds)
     md = markdown(table)
     print(md)
