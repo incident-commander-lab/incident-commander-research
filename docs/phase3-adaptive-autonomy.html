@@ -1,0 +1,1085 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Incident Commander — Phase 3: Adaptive Autonomy for Autonomous SRE Agents</title>
+<meta name="author" content="Incident Commander">
+<meta name="description" content="Phase 3 research direction: how an autonomous SRE agent can adapt operational authority from demonstrated reliability, risk, cost, and verified outcomes.">
+<style>
+  :root {
+    --navy: #0c2340;
+    --navy-2: #163556;
+    --ink: #1c2733;
+    --muted: #5c6976;
+    --line: #e3ddd4;
+    --line-strong: #cfc6b8;
+    --paper: #ffffff;
+    --wash: #f6f4ef;
+    --teal: #0e6e6e;
+    --teal-deep: #0a5555;
+    --teal-soft: #e8f3f2;
+    --amber: #8a5a12;
+    --amber-soft: #f8f1e3;
+    --rose: #7d3434;
+    --rose-soft: #f8eeee;
+    --green: #1b5e3b;
+    --green-soft: #e7f3ec;
+  }
+
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: white;
+    color: var(--ink);
+    font-family: "Segoe UI", Calibri, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.48;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 17mm 16mm 15mm 16mm;
+    @top-left {
+      content: "INCIDENT COMMANDER";
+      font-family: "Segoe UI", sans-serif;
+      font-size: 7.5pt;
+      font-weight: 700;
+      letter-spacing: 0.16em;
+      color: #0c2340;
+    }
+    @top-right {
+      content: "PHASE 3  ·  RESEARCH DIRECTION";
+      font-family: "Segoe UI", sans-serif;
+      font-size: 7.5pt;
+      letter-spacing: 0.08em;
+      color: #5c6976;
+    }
+    @bottom-left {
+      content: "Adaptive autonomy for autonomous SRE agents";
+      font-family: "Segoe UI", sans-serif;
+      font-size: 8pt;
+      color: #8b938c;
+    }
+    @bottom-right {
+      content: counter(page);
+      font-family: "Segoe UI", sans-serif;
+      font-size: 9pt;
+      font-weight: 700;
+      color: #0c2340;
+    }
+  }
+
+  @page :first {
+    margin: 0;
+    @top-left { content: none; }
+    @top-right { content: none; }
+    @bottom-left { content: none; }
+    @bottom-right { content: none; }
+  }
+
+  p { margin: 0 0 0.55em; orphans: 3; widows: 3; }
+  strong { font-weight: 650; }
+  em { font-style: italic; }
+
+  h2 {
+    font-size: 14.5pt;
+    font-weight: 650;
+    letter-spacing: -0.015em;
+    color: var(--navy);
+    line-height: 1.2;
+    margin: 1.15em 0 0.35em;
+    padding-top: 0.15em;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+  h2.newpage {
+    break-before: page;
+    page-break-before: always;
+    margin-top: 0;
+  }
+  h2 .num {
+    display: inline-block;
+    min-width: 1.5em;
+    margin-right: 0.35em;
+    color: var(--teal);
+    font-size: 11pt;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  h3 {
+    font-size: 11.25pt;
+    font-weight: 650;
+    color: var(--navy-2);
+    margin: 0.85em 0 0.25em;
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .cover {
+    width: 210mm;
+    height: 297mm;
+    background: var(--navy);
+    color: #f4f7fb;
+    padding: 22mm 18mm 16mm;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    overflow: hidden;
+    break-after: page;
+    page-break-after: always;
+  }
+  .cover-bar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4mm;
+    background: #149696;
+  }
+  .kicker-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 8.5pt;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #b7d4d4;
+    font-weight: 650;
+  }
+  .cover-rule {
+    height: 0.4pt;
+    background: rgba(255,255,255,0.22);
+    margin: 5mm 0 8mm;
+  }
+  .phase-label {
+    font-size: 9pt;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: #7ecfcf;
+    font-weight: 700;
+    margin-bottom: 4mm;
+  }
+  .cover h1 {
+    margin: 0;
+    font-size: 34pt;
+    line-height: 1.02;
+    font-weight: 650;
+    letter-spacing: -0.03em;
+    color: #f7f4ee;
+    max-width: 170mm;
+  }
+  .deck {
+    margin: 6mm 0 0;
+    max-width: 158mm;
+    font-family: Georgia, "Palatino Linotype", serif;
+    font-size: 13pt;
+    line-height: 1.4;
+    color: #d5e0ea;
+  }
+  .cover-mid {
+    margin-top: auto;
+    margin-bottom: auto;
+    max-width: 158mm;
+    border-left: 2pt solid #149696;
+    padding: 1mm 0 1mm 5mm;
+  }
+  .cover-mid p {
+    margin: 0;
+    font-family: Georgia, "Palatino Linotype", serif;
+    font-size: 13.5pt;
+    line-height: 1.42;
+    color: #e8eef5;
+  }
+  .qbox {
+    margin-top: 0;
+    max-width: 168mm;
+    border: 0.6pt solid rgba(255,255,255,0.22);
+    background: rgba(255,255,255,0.05);
+    padding: 5mm 6mm 5.5mm;
+  }
+  .qbox .label {
+    font-size: 7.5pt;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: #7ecfcf;
+    font-weight: 700;
+    margin-bottom: 2.2mm;
+  }
+  .qbox p {
+    margin: 0;
+    font-family: Georgia, "Palatino Linotype", serif;
+    font-size: 12pt;
+    line-height: 1.42;
+    color: #f4f7fb;
+  }
+  .cover-bottom { margin-top: 12mm; }
+  .phases {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 3mm;
+    margin-bottom: 6mm;
+  }
+  .phases div {
+    border-top: 1.5pt solid #149696;
+    padding-top: 2.5mm;
+  }
+  .phases .n {
+    display: block;
+    font-size: 8pt;
+    letter-spacing: 0.14em;
+    color: #7ecfcf;
+    font-weight: 700;
+    margin-bottom: 1mm;
+  }
+  .phases strong {
+    display: block;
+    font-size: 11pt;
+    font-weight: 650;
+    color: #f7f4ee;
+    margin-bottom: 0.6mm;
+  }
+  .phases span {
+    display: block;
+    font-size: 8.5pt;
+    line-height: 1.3;
+    color: #c5d3df;
+  }
+  .cover-foot {
+    font-size: 8.5pt;
+    letter-spacing: 0.04em;
+    color: #9fb0c0;
+  }
+
+  .docband {
+    display: grid;
+    grid-template-columns: 1.3fr 1fr 1fr 1fr;
+    gap: 0;
+    border: 0.6pt solid var(--line-strong);
+    margin: 0 0 5mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .docband div { padding: 2.4mm 3.2mm 2.6mm; }
+  .docband div + div { border-left: 0.6pt solid var(--line); }
+  .docband .k {
+    display: block;
+    font-size: 7pt;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 700;
+    margin-bottom: 0.6mm;
+  }
+  .docband .v {
+    display: block;
+    font-size: 9pt;
+    color: var(--navy);
+    font-weight: 650;
+    line-height: 1.25;
+  }
+
+  .lede {
+    font-size: 11.25pt;
+    line-height: 1.45;
+    color: var(--navy-2);
+    margin-bottom: 0.7em;
+  }
+
+  blockquote {
+    margin: 0.65em 0 0.8em;
+    padding: 3.2mm 4mm 3.4mm 4.2mm;
+    border-left: 2.4pt solid var(--teal);
+    background: var(--teal-soft);
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  blockquote p {
+    margin: 0;
+    font-family: Georgia, "Palatino Linotype", serif;
+    font-size: 11.25pt;
+    line-height: 1.4;
+    color: var(--navy);
+  }
+  blockquote .tag {
+    display: block;
+    font-family: "Segoe UI", sans-serif;
+    font-style: normal;
+    font-size: 7pt;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--teal-deep);
+    font-weight: 700;
+    margin-bottom: 1.4mm;
+  }
+  blockquote.amber { background: var(--amber-soft); border-left-color: var(--amber); }
+  blockquote.amber .tag { color: var(--amber); }
+  blockquote.navy { background: #eef2f6; border-left-color: var(--navy); }
+  blockquote.navy .tag { color: var(--navy); }
+
+  .stats {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 2.4mm;
+    margin: 2.5mm 0 3.5mm;
+  }
+  .stat {
+    border: 0.6pt solid var(--line-strong);
+    background: var(--wash);
+    padding: 3mm 3.2mm 2.8mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .stat b {
+    display: block;
+    font-size: 16pt;
+    line-height: 1;
+    letter-spacing: -0.03em;
+    color: var(--navy);
+    font-weight: 700;
+  }
+  .stat span {
+    display: block;
+    margin-top: 1.3mm;
+    font-size: 8.25pt;
+    line-height: 1.3;
+    color: #3c4956;
+  }
+  .note {
+    font-size: 8.5pt;
+    color: var(--muted);
+    margin: -0.2em 0 0.7em;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2mm 0 3.5mm;
+    font-size: 8.7pt;
+    line-height: 1.35;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  th {
+    text-align: left;
+    font-size: 7.4pt;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--navy);
+    font-weight: 700;
+    background: var(--wash);
+    border-bottom: 1pt solid var(--navy);
+    padding: 1.8mm 2.2mm;
+    vertical-align: bottom;
+  }
+  td {
+    padding: 2mm 2.2mm;
+    border-bottom: 0.4pt solid var(--line);
+    vertical-align: top;
+    color: var(--ink);
+  }
+  tr:last-child td { border-bottom: 0.6pt solid var(--line-strong); }
+  td.emph { font-weight: 650; color: var(--navy); }
+
+  .split {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3mm;
+    margin: 2.5mm 0 3.5mm;
+  }
+  .card {
+    border: 0.6pt solid var(--line-strong);
+    padding: 3.2mm 3.6mm 3mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    background: white;
+  }
+  .card.good { background: var(--green-soft); border-color: #b7d7c6; }
+  .card.warn { background: var(--amber-soft); border-color: #e4d3b0; }
+  .card.bad { background: var(--rose-soft); border-color: #e4c4c4; }
+  .card.plain { background: var(--wash); }
+  .card .ey {
+    font-size: 7.2pt;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 700;
+    margin-bottom: 1mm;
+  }
+  .card.good .ey { color: var(--green); }
+  .card.warn .ey { color: var(--amber); }
+  .card.bad .ey { color: var(--rose); }
+  .card.plain .ey { color: var(--teal-deep); }
+  .card h4 {
+    margin: 0 0 1.4mm;
+    font-size: 11pt;
+    color: var(--navy);
+    font-weight: 650;
+  }
+  .card ul, .prose ul {
+    margin: 0.2em 0 0.2em;
+    padding-left: 1.15em;
+  }
+  .card li, .prose li { margin: 0.12em 0; }
+  .card p:last-child, .card ul:last-child { margin-bottom: 0; }
+
+  .phases-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 2.6mm;
+    margin: 2.5mm 0 3.5mm;
+  }
+  .phase {
+    background: var(--navy);
+    color: #f4f7fb;
+    padding: 3.4mm 3.6mm 3.6mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+    min-height: 38mm;
+  }
+  .phase.on { background: var(--teal-deep); }
+  .phase .n {
+    font-size: 7.5pt;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: #8fd4d4;
+    font-weight: 700;
+  }
+  .phase h4 {
+    margin: 1.2mm 0 1.6mm;
+    font-size: 11.5pt;
+    font-weight: 650;
+    color: white;
+  }
+  .phase .q {
+    font-family: Georgia, "Palatino Linotype", serif;
+    font-size: 9.5pt;
+    line-height: 1.35;
+    color: #e7eef5;
+    margin: 0 0 2mm;
+  }
+  .phase .d {
+    font-size: 8.25pt;
+    line-height: 1.35;
+    color: #c5d5e2;
+    margin: 0;
+  }
+
+  .flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1.4mm 1mm;
+    margin: 2mm 0 2.5mm;
+  }
+  .flow span {
+    border: 0.7pt solid var(--navy);
+    color: var(--navy);
+    font-size: 7.6pt;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 1.6mm 2.3mm;
+    background: white;
+  }
+  .flow span.ext {
+    background: var(--teal);
+    border-color: var(--teal);
+    color: white;
+  }
+  .flow i {
+    width: 0;
+    height: 0;
+    border-top: 1.15mm solid transparent;
+    border-bottom: 1.15mm solid transparent;
+    border-left: 1.7mm solid #9aa8a4;
+    display: inline-block;
+  }
+  .legend {
+    font-size: 8pt;
+    color: var(--muted);
+    margin: 0 0 2.5mm;
+  }
+  .legend b.swatch {
+    display: inline-block;
+    width: 2.4mm;
+    height: 2.4mm;
+    background: var(--teal);
+    margin: 0 1mm 0 0;
+    vertical-align: -0.3mm;
+  }
+
+  .chips {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 1.8mm;
+    margin: 1.5mm 0 3mm;
+  }
+  .chips span {
+    display: block;
+    border: 0.5pt solid var(--line-strong);
+    background: var(--wash);
+    padding: 1.8mm 2.4mm;
+    font-size: 8.5pt;
+    font-weight: 650;
+    color: var(--navy);
+    break-inside: avoid;
+  }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.2mm 6mm;
+    margin: 1.5mm 0 3mm;
+    padding: 0;
+    list-style: none;
+  }
+  .metrics li {
+    display: grid;
+    grid-template-columns: 6mm 1fr;
+    gap: 1.5mm;
+    align-items: baseline;
+    break-inside: avoid;
+    padding: 1mm 0;
+    border-bottom: 0.4pt solid var(--line);
+    font-size: 9.5pt;
+  }
+  .metrics .n {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: var(--teal);
+    font-size: 8.5pt;
+  }
+
+  .call {
+    background: var(--wash);
+    border: 0.6pt solid var(--line-strong);
+    padding: 3.2mm 4mm;
+    margin: 2mm 0 3mm;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .call .ey {
+    font-size: 7.2pt;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--teal-deep);
+    margin-bottom: 1mm;
+  }
+  .call p:last-child { margin-bottom: 0; }
+
+  ol.refs {
+    margin: 1.5mm 0 0;
+    padding-left: 1.4em;
+    font-size: 9pt;
+    line-height: 1.4;
+    color: #2a3540;
+  }
+  ol.refs li { margin: 0 0 1.6mm; padding-left: 0.4mm; }
+  ol.refs em { font-style: italic; }
+
+  .keep { break-inside: avoid; page-break-inside: avoid; }
+  .thirds {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 2.6mm;
+    margin: 2.5mm 0 3.5mm;
+  }
+  .endrule {
+    margin-top: 6mm;
+    border-top: 0.6pt solid var(--line-strong);
+    padding-top: 2.5mm;
+    font-size: 8pt;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+
+  h2, h3, .lede { break-after: avoid; }
+</style>
+</head>
+<body>
+
+<section class="cover">
+  <div class="cover-bar"></div>
+  <div class="kicker-row">
+    <span>Incident Commander</span>
+    <span>Research direction brief</span>
+  </div>
+  <div class="cover-rule"></div>
+  <div class="phase-label">Phase 03 &nbsp;·&nbsp; October 2026</div>
+  <h1>Adaptive autonomy<br>for autonomous<br>SRE agents</h1>
+  <p class="deck">How an autonomous site-reliability agent can earn, maintain, or lose operational authority as verified evidence accumulates.</p>
+  <div class="cover-mid">
+    <p>Authority should widen when verified history shows it is justified, and narrow when the evidence shows it is not.</p>
+  </div>
+  <div class="qbox">
+    <div class="label">Research question</div>
+    <p>How can an autonomous SRE agent dynamically adapt its operational authority based on demonstrated reliability, action risk, cost, and verified outcomes?</p>
+  </div>
+  <div class="cover-bottom">
+    <div class="phases">
+      <div>
+        <span class="n">Phase 01</span>
+        <strong>Evidence</strong>
+        <span>Decide what to investigate next.</span>
+      </div>
+      <div>
+        <span class="n">Phase 02</span>
+        <strong>Action</strong>
+        <span>Decide whether and how to act, under policy.</span>
+      </div>
+      <div>
+        <span class="n">Phase 03</span>
+        <strong>Authority</strong>
+        <span>Decide how much authority is justified now.</span>
+      </div>
+    </div>
+    <div class="cover-foot">Evidence selection &nbsp;→&nbsp; Autonomous remediation &nbsp;→&nbsp; Adaptive autonomy</div>
+  </div>
+</section>
+
+<div class="docband">
+  <div>
+    <span class="k">Document</span>
+    <span class="v">Phase 3 research direction</span>
+  </div>
+  <div>
+    <span class="k">Status</span>
+    <span class="v">Direction for study design</span>
+  </div>
+  <div>
+    <span class="k">Project</span>
+    <span class="v">Incident Commander</span>
+  </div>
+  <div>
+    <span class="k">Date</span>
+    <span class="v">9 October 2026</span>
+  </div>
+</div>
+
+<p class="lede">Incident Commander already studies what evidence to collect, and how an agent may act once policy allows it. Phase 3 asks a later question: how much authority that agent should hold, and how that authority should change when operational history proves the current boundary too wide or too narrow.</p>
+
+<div class="call">
+  <div class="ey">How to read this brief</div>
+  <p>This document fixes a research direction. It states the question, places it against current papers and products, and specifies the policy, the experiment, and the result that would count as success. A systematic literature review is still required before any final novelty claim. Adaptive autonomy, oversight, reliability measurement, and cost-aware evaluation are each already studied. The proposed contribution is their joint operationalization for SRE incident response.</p>
+</div>
+
+<h2><span class="num">01</span>Research objective</h2>
+<p>Phase 1 decides which evidence to collect next during an investigation. Phase 2 extends that process into autonomous action: policy authorization, execution, verification, and audit. Both capabilities are already active subjects in research systems and commercial platforms.</p>
+<p>Phase 3 therefore does not ask whether an AI agent can investigate an incident or remediate one. The question is how an autonomous SRE agent can safely change the amount of authority it holds over time, using demonstrated reliability, risk, cost, and verified operational outcomes.</p>
+<blockquote>
+  <span class="tag">Central idea</span>
+  <p>Autonomy is not a fixed configuration. It is a decision that can change according to evidence from previous outcomes.</p>
+</blockquote>
+
+<h2><span class="num">02</span>Why this problem matters now</h2>
+<p>AI agents are already deployed in production. The live question in research and industry has moved from whether agents can perform useful tasks to whether organizations can operate them reliably and economically at scale.</p>
+
+<h3>Production-agent evidence</h3>
+<p>The ICML 2026 paper “Measuring Agents in Production” studied 20 production-agent case studies and surveyed practitioners responsible for 86 deployed systems across 26 domains.</p>
+<div class="stats">
+  <div class="stat"><b>68%</b><span>of production agents execute at most 10 steps before human intervention</span></div>
+  <div class="stat"><b>70%</b><span>rely primarily on prompting off-the-shelf models rather than weight tuning</span></div>
+  <div class="stat"><b>74%</b><span>depend primarily on human evaluation</span></div>
+</div>
+<p>Reliability — consistent correct behavior over time — was identified as the top development challenge. The central problem is no longer whether an agent can complete a task once. A major challenge is determining whether its behavior is reliable enough to justify continued autonomous operation.</p>
+
+<h3>Agent reliability evidence</h3>
+<p>The ICML 2026 paper “Towards a Science of AI Agent Reliability” argues that standard benchmark accuracy is insufficient for evaluating agents. The authors introduce a 12-metric reliability profile covering consistency, robustness, predictability, and safety. Across 15 models and two benchmarks, recent capability improvements produce only small improvements in reliability.</p>
+<blockquote>
+  <span class="tag">Implication for SRE autonomy</span>
+  <p>High task accuracy does not imply readiness for autonomous production authority. An agent can show a high average success rate and still be inconsistent, fragile, unpredictable, or capable of severe failures.</p>
+</blockquote>
+
+<h2><span class="num">03</span>Autonomous SRE is already an active area</h2>
+<p>Autonomous incident response, by itself, is not a sufficient research gap. Diagnosis, remediation, and verification are already under study, and current benchmarks show that the tasks remain hard.</p>
+
+<h3>STRATUS</h3>
+<p>The NeurIPS 2025 system STRATUS — a multi-agent system for autonomous reliability engineering of modern clouds — investigates autonomous SRE on benchmarks including AIOpsLab and ITBench. The reported system achieved at least a 1.5× success-rate improvement over state-of-the-art SRE agents across multiple models. STRATUS also introduces Transactional No-Regression (TNR): system changes are evaluated so that remediation does not introduce regressions.</p>
+
+<h3>ITBench</h3>
+<p>IBM Research’s ITBench evaluates AI agents on real-world IT automation across SRE, cybersecurity, and FinOps. The published benchmark (ICML 2025) contains 102 scenarios. Reported state-of-the-art results remain low.</p>
+<div class="stats">
+  <div class="stat"><b>11.4%</b><span>of SRE scenarios resolved by agents on state-of-the-art models (ICML 2025)</span></div>
+  <div class="stat"><b>25.2%</b><span>reported state of the art on CISO tasks</span></div>
+  <div class="stat"><b>0%</b><span>reported state of the art on FinOps tasks</span></div>
+</div>
+<p>Autonomous IT operations remain far from solved. The research gap should still be framed more sharply than “AI agents cannot yet solve IT incidents.”</p>
+<blockquote>
+  <span class="tag">Sharper question</span>
+  <p>Given that autonomous agents are increasingly capable, how should their operational authority be determined and adapted when their reliability is uncertain?</p>
+</blockquote>
+
+<h2><span class="num">04</span>Platforms already expose autonomy controls</h2>
+<p>Commercial platforms treat autonomy as an operational product concern. Microsoft’s Azure SRE Agent provides two explicit operating modes.</p>
+<div class="split">
+  <div class="card plain">
+    <div class="ey">Review mode</div>
+    <h4>Propose, then wait</h4>
+    <p>The agent investigates and proposes an action, then waits for approval.</p>
+  </div>
+  <div class="card plain">
+    <div class="ey">Autonomous mode</div>
+    <h4>Investigate and execute</h4>
+    <p>The agent investigates and executes actions without waiting for approval.</p>
+  </div>
+</div>
+<p>Microsoft recommends starting in review mode, observing the agent for two to four weeks, and moving specific triggers to autonomous execution once patterns are consistently approved. Autonomy can be configured per response plan or task, rather than as one global setting. Different incident types and actions need not receive the same level of autonomy.</p>
+<p>The current platform model is largely configuration-driven: humans define when a particular trigger or response plan becomes autonomous.</p>
+<blockquote>
+  <span class="tag">Motivating question</span>
+  <p>Can the system itself learn from verified operational outcomes and adjust the autonomy boundary, rather than relying primarily on manually configured autonomy levels?</p>
+</blockquote>
+
+<h2><span class="num">05</span>Governance is an autonomy-level problem</h2>
+<p>Gartner’s 2026 research argues against treating AI-agent governance as binary. Gartner predicts that by 2027, 40% of enterprises will demote or decommission autonomous AI agents because of governance gaps discovered after production incidents. The research describes multiple autonomy levels, from observation to autonomous action, and argues that governance should be proportional to the agent’s autonomy and scope.</p>
+<blockquote>
+  <span class="tag">Design principle</span>
+  <p>Autonomy should be bounded by the level of trust and risk associated with the action. Proportional governance still leaves open how those boundaries should change automatically as the agent accumulates operational evidence.</p>
+</blockquote>
+
+<h2><span class="num">06</span>Act versus ask is already studied</h2>
+<p>Phase 3 has to acknowledge existing work on adaptive oversight. The ICML 2026 paper “The Oversight Game” models an agent that chooses to act autonomously (“PLAY”) or to defer (“ASK”). The work studies when agents should act versus request oversight, and reports reductions in safety violations in its experimental setting. A second ICML 2026 paper, “Calibrating Conservatism for Scalable Oversight,” studies how agents can learn to defer when autonomous action is less reliable.</p>
+<blockquote class="amber">
+  <span class="tag">Novelty boundary</span>
+  <p>The contribution cannot be “our agent decides whether to act or ask a human.” That problem is already under research. The Phase 3 question has to be narrower, and grounded in SRE operations.</p>
+</blockquote>
+
+<h2><span class="num">07</span>Autonomy is already being measured</h2>
+<p>Recent work treats autonomy itself as a measurable property. Microsoft Research’s 2026 work on agent planning for security and autonomy defines an autonomy-oriented metric from the fraction of consequential actions an agent can execute without human approval while preserving security. Autonomy can be a research objective, not only an interface setting.</p>
+<div class="keep">
+<p>The remaining opportunity for Incident Commander is to connect that idea to longitudinal operational evidence:</p>
+<ul>
+  <li>What happened when the agent acted previously?</li>
+  <li>Was the action correct, and was the outcome verified?</li>
+  <li>Did the action require rollback?</li>
+  <li>Did a human intervene?</li>
+  <li>What did the action cost, and how risky was it?</li>
+</ul>
+<p>Those observations can determine whether future authority should increase, remain unchanged, or decrease.</p>
+</div>
+
+<h2><span class="num">08</span>Cost is an independent dimension</h2>
+<p>Cost is not another word for trust. Recent evaluation research treats cost-efficiency as its own open dimension. The ACL 2026 survey “A Survey on Evaluation of LLM-based Agents” identifies gaps in cost-efficiency, safety, robustness, fine-grained evaluation, and scalable evaluation.</p>
+<p>The ACL 2026 AgencyBench makes the scale of the cost problem concrete. It evaluates 138 tasks across 32 real-world scenarios. On average, scenarios require about 90 tool calls, about 1 million tokens, and hours of execution. The benchmark also finds substantial differences between models in resource efficiency and self-correction.</p>
+<blockquote>
+  <span class="tag">Implication for autonomous SRE</span>
+  <p>An agent should be judged not only by whether it eventually resolves an incident, but by how much investigation, computation, tool use, and operational cost it consumes. A second Phase 3 question follows: can autonomy increase while the cost of autonomous investigation and remediation stays bounded?</p>
+</blockquote>
+
+<h2><span class="num">09</span>The research gap</h2>
+<p>The literature already contains work on autonomous SRE, autonomous remediation, act-versus-defer decisions, safety and oversight, agent reliability, autonomy measurement, governance, and cost-efficient evaluation. The contribution should not claim that any one of these ideas is new.</p>
+<p>The stronger gap is the combination, and its operationalization, for SRE autonomy.</p>
+<blockquote class="navy">
+  <span class="tag">Proposed gap — a hypothesis, not a novelty claim</span>
+  <p>Existing work increasingly measures agent reliability, safety, cost, and autonomy separately, while production platforms commonly configure autonomy levels by hand. A research opportunity is to test whether verified operational outcomes can dynamically adapt an SRE agent’s authority on a per-action or per-incident basis, while jointly considering reliability, risk, and cost.</p>
+</blockquote>
+<p class="note">A systematic literature review should still be completed before a final novelty claim.</p>
+
+<h2><span class="num">10</span>What adaptive autonomy means</h2>
+<p>Adaptive autonomy does not mean the language model retrains itself online. The operational policy adapts from verified outcomes. Authority becomes specific to the action and dependent on evidence. The agent is neither simply “autonomous” nor simply “not autonomous.”</p>
+<div class="split">
+  <div class="card good">
+    <div class="ey">Action A · evidence supports wider authority</div>
+    <h4>Rollback a deployment</h4>
+    <ul>
+      <li>100 rollback actions observed</li>
+      <li>98 verified successful; 2 reverted</li>
+      <li>No harmful autonomous actions observed</li>
+      <li>The action is reversible and low cost</li>
+    </ul>
+    <p>The record is strong for this action under these conditions. The policy may allow broader autonomous execution for similar incidents.</p>
+  </div>
+  <div class="card warn">
+    <div class="ey">Action B · evidence keeps authority restricted</div>
+    <h4>Database failover</h4>
+    <ul>
+      <li>6 of 10 attempts successful</li>
+      <li>Several cases require intervention</li>
+      <li>Operational risk is high</li>
+      <li>Recovery is more difficult</li>
+    </ul>
+    <p>The same autonomy level as rollback is not justified. Authority stays narrower until the record improves.</p>
+  </div>
+</div>
+
+<h2><span class="num">11</span>Reliability, risk, and cost together</h2>
+<p>A broader question sits beside the main one: can reliability, risk, and cost jointly determine the appropriate autonomy level for an SRE action? The three dimensions are different properties.</p>
+<div class="thirds">
+  <div class="card plain">
+    <div class="ey">Reliability</div>
+    <h4>Correct under similar conditions</h4>
+    <p>How often the agent makes the correct decision when the situation resembles cases already on record.</p>
+  </div>
+  <div class="card plain">
+    <div class="ey">Risk</div>
+    <h4>Severity if the action is wrong</h4>
+    <p>How serious the consequence is, including whether the action can be reversed.</p>
+  </div>
+  <div class="card plain">
+    <div class="ey">Cost</div>
+    <h4>Expense of investigating and acting</h4>
+    <p>Tool use, computation, time, and operational disruption.</p>
+  </div>
+</div>
+<table>
+  <thead>
+    <tr>
+      <th style="width:34%">Action</th>
+      <th>Reliability</th>
+      <th>Risk</th>
+      <th>Cost</th>
+      <th>Potential autonomy</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="emph">Roll back a recent deployment</td>
+      <td>High</td>
+      <td>Low / medium</td>
+      <td>Low</td>
+      <td>High</td>
+    </tr>
+    <tr>
+      <td class="emph">Restart an unhealthy service</td>
+      <td>High</td>
+      <td>Medium</td>
+      <td>Low</td>
+      <td>High / medium</td>
+    </tr>
+    <tr>
+      <td class="emph">Database failover</td>
+      <td>Medium / high</td>
+      <td>High</td>
+      <td>Medium</td>
+      <td>Restricted</td>
+    </tr>
+    <tr>
+      <td class="emph">Irreversible infrastructure change</td>
+      <td>High</td>
+      <td>Very high</td>
+      <td>Variable</td>
+      <td>Very low / denied</td>
+    </tr>
+    <tr>
+      <td class="emph">Investigate an unknown failure</td>
+      <td>Uncertain</td>
+      <td>Low at first</td>
+      <td>High</td>
+      <td>Limited investigation</td>
+    </tr>
+  </tbody>
+</table>
+<blockquote>
+  <span class="tag">The decision to study</span>
+  <p>Given demonstrated reliability, the consequences of failure, and the cost of acting or investigating, what level of autonomy is justified? Confidence alone is not the decision.</p>
+</blockquote>
+
+<div class="keep">
+<h2><span class="num">12</span>Proposed research question</h2>
+<p>On the current literature and industry evidence, the strongest candidate question is:</p>
+<blockquote class="navy">
+  <span class="tag">Phase 3 research question</span>
+  <p>How can an autonomous SRE agent dynamically adapt its operational authority based on demonstrated reliability, action risk, cost, and verified outcomes?</p>
+</blockquote>
+</div>
+<p>A shorter line, suitable for a talk:</p>
+<blockquote>
+  <span class="tag">Presentation form</span>
+  <p>Can SRE autonomy adapt from verified operational outcomes?</p>
+</blockquote>
+<p>The working hypothesis:</p>
+<blockquote>
+  <span class="tag">Hypothesis</span>
+  <p>An SRE agent can safely expand or reduce its autonomy when autonomy decisions are based on demonstrated reliability, risk, cost, and verified operational outcomes, rather than on a fixed autonomy setting.</p>
+</blockquote>
+
+<h2><span class="num">13</span>How this extends Incident Commander</h2>
+<p>The three phases form one research progression. Phase 3 is the authority decision that follows evidence selection and authorized action. It uses historical verified outcomes to adapt operational autonomy.</p>
+<div class="phases-body">
+  <div class="phase">
+    <div class="n">Phase 1 · Evidence decision</div>
+    <h4>What next?</h4>
+    <p class="q">What should I investigate next?</p>
+    <p class="d">The system optimizes evidence collection.</p>
+  </div>
+  <div class="phase">
+    <div class="n">Phase 2 · Action decision</div>
+    <h4>May I act?</h4>
+    <p class="q">Do I have enough evidence to act, and is the action allowed?</p>
+    <p class="d">Investigate, decide, authorize, act, verify, and audit.</p>
+  </div>
+  <div class="phase on">
+    <div class="n">Phase 3 · Authority decision</div>
+    <h4>How much authority?</h4>
+    <p class="q">Given what has happened before, how much authority should I have for this type of action now?</p>
+    <p class="d">Adapt autonomy from verified operational history.</p>
+  </div>
+</div>
+
+<h2><span class="num">14</span>Proposed architecture</h2>
+<p>The existing Incident Commander loop extends through outcome measurement into an explicit update of the autonomy boundary. The final step updates an autonomy policy. It does not modify the underlying model weights.</p>
+<div class="flow">
+  <span>Detect</span><i></i>
+  <span>Investigate</span><i></i>
+  <span>Decide</span><i></i>
+  <span>Authorize</span><i></i>
+  <span>Act</span><i></i>
+  <span>Verify</span><i></i>
+  <span class="ext">Measure outcome</span><i></i>
+  <span class="ext">Update history</span><i></i>
+  <span class="ext">Adjust boundary</span>
+</div>
+<p class="legend"><b class="swatch"></b>Teal marks the Phase 3 extension. Detect through verify is the existing loop.</p>
+<p>Possible policy outputs for a given action and context:</p>
+<div class="chips">
+  <span>Increase autonomy</span>
+  <span>Maintain current autonomy</span>
+  <span>Restrict autonomy</span>
+  <span>Require additional evidence</span>
+  <span>Escalate</span>
+  <span>Deny</span>
+</div>
+
+<div class="keep">
+<h2><span class="num">15</span>Experimental design</h2>
+<p>The strongest experiment compares two systems on the same incident scenarios.</p>
+<div class="split">
+  <div class="card plain">
+    <div class="ey">Baseline</div>
+    <h4>Fixed autonomy</h4>
+    <p>The same autonomy policy is used throughout the experiment.</p>
+  </div>
+  <div class="card plain">
+    <div class="ey">Proposed</div>
+    <h4>Adaptive autonomy</h4>
+    <p>The system adjusts autonomy from verified historical outcomes.</p>
+  </div>
+</div>
+</div>
+<p>Measure both systems on the same scenarios:</p>
+<ol class="metrics">
+  <li><span class="n">01</span>Incident resolution rate</li>
+  <li><span class="n">02</span>Root-cause accuracy</li>
+  <li><span class="n">03</span>Harmful-action rate</li>
+  <li><span class="n">04</span>Rollback / reversion rate</li>
+  <li><span class="n">05</span>Human intervention rate</li>
+  <li><span class="n">06</span>Number of autonomous actions</li>
+  <li><span class="n">07</span>Investigation cost</li>
+  <li><span class="n">08</span>Tool calls</li>
+  <li><span class="n">09</span>LLM tokens</li>
+  <li><span class="n">10</span>Time to resolution</li>
+  <li><span class="n">11</span>Calibration / reliability</li>
+  <li><span class="n">12</span>Autonomy achieved over time</li>
+</ol>
+<blockquote>
+  <span class="tag">Trade-off under test</span>
+  <p>Can adaptive autonomy increase autonomous coverage without increasing harmful actions, while keeping operational cost bounded?</p>
+</blockquote>
+
+<h2><span class="num">16</span>What counts as success</h2>
+<p>A successful Phase 3 result is not “the agent became more autonomous.” That outcome can be dangerous. The stronger result is that the adaptive system increased autonomous coverage while holding or improving safety and reliability, without a disproportionate rise in investigation or execution cost.</p>
+<table>
+  <thead>
+    <tr>
+      <th>Signal</th>
+      <th>Illustrative movement</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td class="emph">Autonomous coverage</td><td>Increase</td></tr>
+    <tr><td class="emph">Human interventions</td><td>Decrease</td></tr>
+    <tr><td class="emph">Resolution rate</td><td>Increase, or hold</td></tr>
+    <tr><td class="emph">Harmful actions</td><td>Near zero</td></tr>
+    <tr><td class="emph">Unreverted failures</td><td>Near zero</td></tr>
+    <tr><td class="emph">Cost per incident</td><td>Decrease, or stay bounded</td></tr>
+    <tr><td class="emph">Reliability and calibration</td><td>Hold, or improve</td></tr>
+  </tbody>
+</table>
+<p class="note">The pattern above is a signature of success, not a set of thresholds. Exact thresholds should be set from the experiment.</p>
+
+<div class="keep">
+<h2><span class="num">17</span>Novelty constraint</h2>
+<p>The project should not claim that adaptive autonomy is unresearched. That claim is too broad. Existing research already covers adaptive oversight, act-versus-defer decisions, autonomy metrics, reliability evaluation, safety-aware autonomy, cost-aware agent evaluation, and governance by autonomy level.</p>
+<div class="split">
+  <div class="card bad">
+    <div class="ey">Outside the claim</div>
+    <h4>Too broad to defend</h4>
+    <p>That no prior work studies adaptive autonomy, oversight, reliability, autonomy metrics, or cost-aware evaluation.</p>
+  </div>
+  <div class="card good">
+    <div class="ey">Defensible contribution</div>
+    <h4>Specific setting and combination</h4>
+    <p>SRE incident-response autonomy that adapts authority from verified operational outcomes, while explicitly using reliability, risk, reversibility, and cost.</p>
+  </div>
+</div>
+</div>
+<p>Novelty should be established by a systematic literature review and by comparison with the closest papers.</p>
+
+<h2><span class="num">18</span>Evaluation platforms and benchmarks</h2>
+<p>Phase 3 should not be evaluated only on synthetic toy examples. The strongest design combines benchmark replay with controlled live telemetry.</p>
+<table>
+  <thead>
+    <tr>
+      <th style="width:32%">Source</th>
+      <th>Role in the evaluation</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="emph">AIOpsLab</td>
+      <td>Controlled autonomous SRE incident scenarios.</td>
+    </tr>
+    <tr>
+      <td class="emph">ITBench</td>
+      <td>Realistic IT automation tasks, including SRE.</td>
+    </tr>
+    <tr>
+      <td class="emph">OpenRCA and RCA benchmarks</td>
+      <td>Root-cause diagnosis and evidence evaluation.</td>
+    </tr>
+    <tr>
+      <td class="emph">OpenTelemetry Demo</td>
+      <td>Reproducible live telemetry and controlled fault injection.</td>
+    </tr>
+    <tr>
+      <td class="emph">Real incident postmortems</td>
+      <td>Replay of real operational failure patterns.</td>
+    </tr>
+    <tr>
+      <td class="emph">Live controlled trials</td>
+      <td>Autonomous remediation, verification, rollback, and adaptive authority.</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2><span class="num">19</span>Research position</h2>
+<p>Autonomous SRE is moving from experimentation toward production deployment. Building an autonomous SRE agent is already being addressed by research and by commercial platforms. The more interesting next question is how such an agent should earn, maintain, or lose operational authority.</p>
+<p>The proposed system remains autonomous by default. Its authority stays bounded by policy, and is informed over time by demonstrated reliability, action risk, reversibility, operational cost, verified outcomes, and the history of intervention and rollback.</p>
+<blockquote class="navy">
+  <span class="tag">Hypothesis</span>
+  <p>Autonomy should be adaptive rather than fixed. An SRE agent should gain broader authority when verified operational history shows that the additional autonomy is justified, and lose authority when the evidence shows that it is not.</p>
+</blockquote>
+<p>That extends Incident Commander from evidence selection, to autonomous remediation, to adaptive autonomy. The project’s core question moves from whether an agent can act autonomously to whether an agent can safely determine and adapt how much autonomy it should have.</p>
+
+<h2 class="newpage"><span class="num">20</span>Works cited in this direction</h2>
+<p class="note">Bibliographic details below are limited to what this brief relies on. Authors, venues beyond the year and meeting named here, and formal citations should be completed in the literature review.</p>
+<ol class="refs">
+  <li>“Measuring Agents in Production.” ICML, 2026. Twenty production-agent case studies; survey of practitioners for 86 deployed systems across 26 domains.</li>
+  <li>“Towards a Science of AI Agent Reliability.” ICML, 2026. Twelve-metric reliability profile; 15 models; two benchmarks.</li>
+  <li>STRATUS: A Multi-Agent System for Autonomous Reliability Engineering of Modern Clouds. NeurIPS, 2025. Includes Transactional No-Regression.</li>
+  <li>ITBench. IBM Research. Jha et al., ICML 2025 (PMLR 267). 102 IT automation scenarios across SRE, CISO, and FinOps.</li>
+  <li>Azure SRE Agent. Microsoft. Review mode and autonomous mode; per-plan autonomy after an observation period.</li>
+  <li>Gartner, 2026. Governance proportional to autonomy; prediction on demotion or decommission of autonomous agents by 2027.</li>
+  <li>“The Oversight Game.” ICML, 2026. Act (PLAY) versus defer (ASK).</li>
+  <li>“Calibrating Conservatism for Scalable Oversight.” ICML, 2026. Learned deference when autonomous action is less reliable.</li>
+  <li>Microsoft Research, 2026. Autonomy metric based on consequential actions taken without approval while preserving security.</li>
+  <li>“A Survey on Evaluation of LLM-based Agents.” ACL, 2026. Gaps include cost-efficiency, safety, robustness, and scalable evaluation.</li>
+  <li>AgencyBench. ACL, 2026. 138 tasks, 32 scenarios; tool-call, token, and runtime cost.</li>
+</ol>
+
+<p class="endrule">Incident Commander · Phase 3 research direction · Adaptive autonomy for autonomous SRE agents · 9 October 2026. This brief sets direction for study design. It is not a novelty claim.</p>
+
+</body>
+</html>
