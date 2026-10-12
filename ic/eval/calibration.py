@@ -18,8 +18,8 @@ under rule v2 and under LLM-picks):
 
 Localization and analysis condition on "some fault" because AIOpsLab guarantees one
 in those tasks. An empty or unparsable submission counts as wrong with confidence 0.
-Plain-LLM (ReAct) rows carry no confidence yet: they appear with accuracy only, until
-confidence is elicited post hoc from their saved trajectories.
+Plain-LLM (ReAct) rows keep no posterior: they appear with accuracy only, unless post-hoc
+confidences from ic/eval/react_confidence.py are passed with --confidence.
 
 Metrics per (model, policy):
   * Brier, ECE (10 equal-width bins)
@@ -60,8 +60,10 @@ def load(paths: list[str]) -> list[dict]:
 
 
 def answer_confidence(r: dict) -> Optional[float]:
-    """P(submitted answer is right) under the run's final posterior; None if the run
-    kept no posterior (plain LLM agent)."""
+    """P(submitted answer is right) under the run's final posterior, or the post-hoc
+    confidence merged in by `merge_posthoc` (plain LLM agent); None if it has neither."""
+    if "posthoc_confidence" in r:
+        return r["posthoc_confidence"]
     post, hyps = r.get("posteriors"), r.get("hypotheses")
     if not post or not hyps:
         return None
@@ -90,6 +92,24 @@ def confidence(post: dict, hyps: dict, task: str, ans) -> Optional[float]:
                    and (hyps[hid].get("system_level"), hyps[hid].get("fault_type")) == ans)
         return mass / p_fault
     return None
+
+
+def merge_posthoc(rows: list[dict], paths: list[str]) -> int:
+    """Attach post-hoc confidences (ic/eval/react_confidence.py output) to their ReAct
+    rows, matched on model, problem and seed. Returns how many rows got one."""
+    conf = {}
+    for p in paths:
+        for line in Path(p).read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                c = json.loads(line)
+                conf[c["key"]] = c["confidence"]
+    n = 0
+    for r in rows:
+        k = f"{r.get('model')}|{r['problem']}|{r.get('seed', 0)}"
+        if r["policy"] == "react" and k in conf:
+            r["posthoc_confidence"] = conf[k]
+            n += 1
+    return n
 
 
 # --------------------------------------------------------------------------- #
@@ -249,8 +269,13 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("paths", nargs="+")
     ap.add_argument("--out", default=None, help="write table.md, table.csv, risk_coverage.png here")
+    ap.add_argument("--confidence", nargs="*", default=[],
+                    help="post-hoc ReAct confidences from ic.eval.react_confidence")
     args = ap.parse_args()
-    table, curves = summarise(load(args.paths))
+    rows = load(args.paths)
+    if args.confidence:
+        print(f"post-hoc confidence attached to {merge_posthoc(rows, args.confidence)} ReAct runs\n")
+    table, curves = summarise(rows)
     md = markdown(table)
     print(md)
     if args.out:
