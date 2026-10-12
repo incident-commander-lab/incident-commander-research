@@ -5,6 +5,11 @@ After the session, copy the answer key out of the sealed volume, then score:
     docker compose exec chaos cat /sealed/ground_truth.jsonl > ground_truth.jsonl
     cd testbed/ops && python -m testbed_ops.score ../ground_truth.jsonl ../incidents
 
+Compare two conditions run on the same fault schedule (same CHAOS_SEED), paired fault by
+fault (McNemar's exact test, RQ3_PROTOCOL.md):
+
+    python -m testbed_ops.score compare KEY_A INCIDENTS_A KEY_B INCIDENTS_B
+
 Standard library only, so it runs on the host without the test bed's dependencies.
 """
 from __future__ import annotations
@@ -355,7 +360,73 @@ def format_calibration(cal: dict) -> str:
     return "\n".join(lines)
 
 
+# ------------------------------------------------------------------ baselines and comparison
+HUMAN_MIN = 10.0   # pre-registered human work per escalation (RQ3_PROTOCOL.md; RQ2 used 600 s)
+
+
+def always_escalate(incidents: list[dict], m: Match, human_min: float = HUMAN_MIN) -> dict:
+    """The human-only baseline, computed from a session instead of run: every detected
+    fault is escalated and a human fixes it `human_min` after detection. It never acts on
+    its own, so it is never harmful and never resolves anything autonomously."""
+    by_id = {r["id"]: r for r in incidents}
+    ttm = [(_ts(by_id[i]["opened"]) - f.injected).total_seconds() / 60 + human_min
+           for i, f in m.scored.items()]
+    return {"faults": len(m.faults), "escalations": len(m.scored) + len(m.natural),
+            "human_minutes": human_min * (len(m.scored) + len(m.natural)),
+            "time_to_mitigation_min": _median_censored(ttm + [None] * len(m.missed)),
+            "harmful_autonomous": 0, "autonomous_resolution": 0}
+
+
+def per_fault(incidents: list[dict], m: Match) -> list[dict]:
+    """One outcome per injected fault, in injection order. A missed fault was neither
+    resolved nor harmed."""
+    by_fault = {f.fault_id: verdict(next(r for r in incidents if r["id"] == i), f)
+                for i, f in m.scored.items()}
+    return [{"fault": f.fault, **({"resolved": by_fault[f.fault_id]["resolved_autonomously"],
+                                   "harmful": by_fault[f.fault_id]["harmful_autonomous"]}
+                                  if f.fault_id in by_fault else {"resolved": False, "harmful": False})}
+            for f in m.faults]
+
+
+def mcnemar_exact(b: int, c: int) -> float:
+    """Two-sided exact McNemar p-value from the discordant pairs b (A only) and c (B only)."""
+    n = b + c
+    if n == 0:
+        return 1.0
+    tail = sum(math.comb(n, k) for k in range(min(b, c) + 1)) / 2 ** n
+    return min(1.0, 2 * tail)
+
+
+def compare(a: list[dict], b: list[dict]) -> dict:
+    """Paired comparison of two sessions' per-fault outcomes. The schedules must match:
+    same seed, so the i-th fault is the same fault in both."""
+    n = min(len(a), len(b))
+    if [x["fault"] for x in a[:n]] != [x["fault"] for x in b[:n]]:
+        raise ValueError("fault schedules differ: were both sessions run with the same CHAOS_SEED?")
+    out = {"paired_faults": n, "unpaired": abs(len(a) - len(b))}
+    for metric in ("resolved", "harmful"):
+        only_a = sum(x[metric] and not y[metric] for x, y in zip(a[:n], b[:n]))
+        only_b = sum(y[metric] and not x[metric] for x, y in zip(a[:n], b[:n]))
+        out[metric] = {"a": sum(x[metric] for x in a[:n]), "b": sum(y[metric] for y in b[:n]),
+                       "only_a": only_a, "only_b": only_b, "p": mcnemar_exact(only_a, only_b)}
+    return out
+
+
+def _session(key: str, folder: str) -> tuple[list[dict], Match]:
+    incidents = load_incidents(Path(folder))
+    return incidents, match(load_faults(Path(key)), incidents)
+
+
 def main(argv: list[str]):
+    if len(argv) == 5 and argv[0] == "compare":
+        a, b = per_fault(*_session(*argv[1:3])), per_fault(*_session(*argv[3:5]))
+        res = compare(a, b)
+        print(f"paired faults: {res['paired_faults']}  (unpaired: {res['unpaired']})")
+        for metric in ("resolved", "harmful"):
+            r = res[metric]
+            print(f"  {metric:9} A {r['a']}  B {r['b']}  A-only {r['only_a']}  B-only {r['only_b']}  "
+                  f"McNemar exact p = {r['p']:.3f}")
+        return
     if len(argv) != 2:
         sys.exit(__doc__)
     faults = load_faults(Path(argv[0]))
@@ -373,6 +444,12 @@ def main(argv: list[str]):
     print(format_metrics(session_metrics(incidents, m)))
     print()
     print(format_calibration(calibration(incidents, m)))
+    e = always_escalate(incidents, m)
+    t = e["time_to_mitigation_min"]
+    print()
+    print(f"always-escalate baseline (H = {HUMAN_MIN:g} min per escalation): "
+          f"{e['escalations']} escalations, {e['human_minutes']:g} human minutes, "
+          f"time to mitigation {t['median']} ({t['censored']} missed), 0 harmful, 0 autonomous")
 
 
 if __name__ == "__main__":

@@ -121,6 +121,32 @@ class AgentErrorTest(unittest.TestCase):
         self.assertEqual(errs["(no fault)"], ["TimeoutError: ollama"])
 
 
+class BaselineAndCompareTest(unittest.TestCase):
+    def test_always_escalate_never_harms_and_waits_for_the_human(self):
+        from testbed_ops.score import always_escalate
+        with tempfile.TemporaryDirectory() as d:
+            faults = load_faults(_key(Path(d), INJECT, END))
+        first = _rec(id="first", opened="2026-10-12T10:01:00+00:00")
+        e = always_escalate([first], match(faults, [first]), human_min=10)
+        self.assertEqual(e["time_to_mitigation_min"]["median"], 11.0)   # 1 min detection + 10
+        self.assertEqual((e["harmful_autonomous"], e["escalations"]), (0, 1))
+
+    def test_mcnemar_uses_only_the_discordant_pairs(self):
+        from testbed_ops.score import mcnemar_exact
+        self.assertEqual(mcnemar_exact(0, 0), 1.0)
+        self.assertAlmostEqual(mcnemar_exact(0, 6), 2 / 64)
+        self.assertAlmostEqual(mcnemar_exact(5, 5), 1.0)
+
+    def test_compare_refuses_different_schedules(self):
+        from testbed_ops.score import compare
+        a = [{"fault": "db_lock", "resolved": True, "harmful": False}]
+        b = [{"fault": "redis_oom", "resolved": False, "harmful": False}]
+        with self.assertRaises(ValueError):
+            compare(a, b)
+        r = compare(a, [{"fault": "db_lock", "resolved": False, "harmful": True}])
+        self.assertEqual((r["resolved"]["only_a"], r["harmful"]["only_b"]), (1, 1))
+
+
 class VerdictTest(unittest.TestCase):
     def test_a_correct_fix_that_holds_is_an_autonomous_resolution(self):
         v = verdict(_rec(), _fault())
