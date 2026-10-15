@@ -58,7 +58,7 @@ def load_faults(path: Path) -> list[Fault]:
         if not line.strip():
             continue
         e = json.loads(line)
-        fid = e["fault_id"]
+        fid = e.get("fault_id")   # schedule / slot_delayed / inject_failed events carry none
         if e["event"] == "inject":
             faults[fid] = Fault(fid, e["fault"], e["service"], e["correct_remedy"], _ts(e["ts"]))
         elif fid in faults and e["event"] == "resolved":
@@ -70,7 +70,7 @@ def load_faults(path: Path) -> list[Fault]:
 
 def load_incidents(folder: Path) -> list[dict]:
     recs = [json.loads(p.read_text(encoding="utf-8")) for p in folder.glob("*.json")]
-    return sorted(recs, key=lambda r: r["opened"])
+    return sorted((r for r in recs if "opened" in r and "id" in r), key=lambda r: r["opened"])  # not header.json
 
 
 def load_agent_errors(folder: Path) -> list[tuple[datetime, str]]:

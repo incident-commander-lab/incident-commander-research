@@ -44,6 +44,14 @@ services:
       REPLAY_SPEED: ${REPLAY_SPEED:-1}
     volumes: ["./recordings:/recordings", "releases:/releases:ro"]
     user: root   # writes recordings to the bind mount
+    # reach Wikimedia through the egress relay (the "internet path" the upstream_cut fault breaks)
+    extra_hosts: ["stream.wikimedia.org:${EGRESS_IP:-10.89.77.50}"]
+
+  egress:
+    image: nginx:1.27-alpine
+    volumes: ["./egress/nginx.conf:/etc/nginx/nginx.conf:ro"]
+    networks: { default: { ipv4_address: "${EGRESS_IP:-10.89.77.50}" } }
+    restart: unless-stopped
 
   worker:
     <<: *app
@@ -102,6 +110,10 @@ services:
       CHAOS_MEAN_GAP_MIN: ${CHAOS_MEAN_GAP_MIN:-30}
       FAULT_TIMEOUT_MIN: ${FAULT_TIMEOUT_MIN:-20}
       CHAOS_SEED: ${CHAOS_SEED:-0}
+      CHAOS_FAULTS: ${CHAOS_FAULTS:-}          # comma-separated subset (default: all)
+      CHAOS_SLOT_MIN: ${CHAOS_SLOT_MIN:-25}    # slots mode: one fault per slot
+      CHAOS_SLOTS: ${CHAOS_SLOTS:-100}
+      CHAOS_JITTER_MIN: ${CHAOS_JITTER_MIN:-3}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - releases:/releases
@@ -115,6 +127,7 @@ services:
     command: ["uvicorn", "testbed_ops.agent:app", "--host", "0.0.0.0", "--port", "8080"]
     environment:
       AUTONOMY: ${AUTONOMY:-shadow}
+      AGENT_KIND: ${AGENT_KIND:-rule}          # rule (ours, frozen) | llm (plain LLM agent, setup 2)
       SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
       VERIFY_SECONDS: ${VERIFY_SECONDS:-120}
       IC_PROVIDER: openrouter_models
@@ -131,6 +144,10 @@ services:
     ports: ["${AGENT_PORT:-8380}:8080"]
     depends_on: [opa, prometheus]
     restart: unless-stopped
+
+networks:
+  default:
+    ipam: { config: [{ subnet: "${PULSE_SUBNET:-10.89.77.0/24}" }] }   # fixed, so the egress relay has a known address
 
 volumes:
   pgdata:

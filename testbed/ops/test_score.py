@@ -260,3 +260,19 @@ class SessionTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_session_folder_extras_are_ignored(tmp_path):
+    """A session folder holds header.json and an answer key with schedule events: neither
+    is an incident or a fault."""
+    from testbed_ops.score import load_faults, load_incidents
+    (tmp_path / "header.json").write_text(json.dumps({"session": "x", "AGENT_KIND": "llm"}))
+    (tmp_path / "a.json").write_text(json.dumps({"id": "a", "opened": "2026-10-15T10:00:00+00:00"}))
+    key = tmp_path / "gt.jsonl"
+    key.write_text("\n".join(json.dumps(e) for e in [
+        {"ts": "2026-10-15T09:59:00+00:00", "event": "schedule", "seed": 1},
+        {"ts": "2026-10-15T09:59:30+00:00", "event": "inject_failed", "fault": "api_down", "error": "x"},
+        {"ts": "2026-10-15T10:00:00+00:00", "event": "inject", "fault_id": "f1", "fault": "upstream_cut",
+         "service": "collector", "correct_remedy": "none"}]))
+    assert [r["id"] for r in load_incidents(tmp_path)] == ["a"]
+    assert [f.fault for f in load_faults(key)] == ["upstream_cut"]

@@ -4,3 +4,6 @@ recordings/*
 incidents/*
 !incidents/.gitkeep
 .env
+sessions/_*
+sessions/.current
+sessions/*/runner.log

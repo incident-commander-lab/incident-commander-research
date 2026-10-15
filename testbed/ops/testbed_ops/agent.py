@@ -37,6 +37,7 @@ from ic.bench.hypotheses import no_fault_hypothesis
 from . import actions, env, probes
 
 AUTONOMY = os.environ.get("AUTONOMY", "shadow")            # shadow | suggest | act
+AGENT_KIND = os.environ.get("AGENT_KIND", "rule")          # rule (frozen rule v2) | llm (setup 2, llm_agent.py)
 OPA_URL = os.environ.get("OPA_URL", "http://opa:8181/v1/data/testbed/decision")
 SLACK = os.environ.get("SLACK_WEBHOOK_URL", "")
 OUT = Path(os.environ.get("INCIDENTS_DIR", "/incidents"))
@@ -201,7 +202,7 @@ def handle(alerts: list[dict]):
     t0 = time.time()
     llm.reset_usage()
     rec = {"id": time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4], "opened": env.now(),
-           "autonomy": AUTONOMY, "rule_version": 2, "alerts": alerts, "act_threshold": round(ACT_THRESHOLD, 3)}
+           "autonomy": AUTONOMY, "agent_kind": "rule", "rule_version": 2, "alerts": alerts, "act_threshold": round(ACT_THRESHOLD, 3)}
     pr = probes.instances()
     services = list(probes.APPLIES)
     # 1. free evidence: every container's state
@@ -323,7 +324,11 @@ def _loop():
     while True:
         alerts = _q.get()
         try:
-            handle(alerts)
+            if AGENT_KIND == "llm":
+                from .llm_agent import handle_llm
+                handle_llm(alerts)
+            else:
+                handle(alerts)
         except Exception as e:
             OUT.mkdir(parents=True, exist_ok=True)
             with (OUT / "agent_errors.log").open("a") as f:
@@ -367,4 +372,4 @@ def incidents():
 
 @app.get("/healthz")
 def healthz():
-    return {"autonomy": AUTONOMY, "act_threshold": ACT_THRESHOLD, "busy": time.time() < _busy_until}
+    return {"autonomy": AUTONOMY, "agent_kind": AGENT_KIND, "act_threshold": ACT_THRESHOLD, "busy": time.time() < _busy_until}

@@ -49,13 +49,22 @@ docker compose exec -d chaos python -m testbed_ops.chaos inject db_lock         
 docker compose exec chaos python -m testbed_ops.chaos heal                     # end it by hand
 ```
 
-| Fault | What really happens | Correct response |
-|---|---|---|
-| `bad_release_worker` | a worker release with a bug (writes a column that doesn't exist) | roll the worker back |
-| `crash_loop_worker` | a worker release with an invalid config: it exits, restarts, exits | roll the worker back |
-| `bad_config_collector` | a collector release pointing at a wrong stream URL | roll the collector back |
-| `db_lock` | an "ad-hoc maintenance query" takes an exclusive table lock and never commits | end the blocking session |
-| `redis_oom` | Redis `maxmemory` set far too low: new events are rejected | restore `maxmemory` |
+| Fault | What really happens | Correct response | Seen? |
+|---|---|---|---|
+| `bad_release_worker` | a worker release with a bug (writes a column that doesn't exist) | roll the worker back | seen (shakedown) |
+| `crash_loop_worker` | a worker release with an invalid config: it exits, restarts, exits | roll the worker back | unseen |
+| `bad_config_collector` | a collector release pointing at a wrong stream URL | roll the collector back | unseen |
+| `db_lock` | an "ad-hoc maintenance query" takes an exclusive table lock and never commits | end the blocking session | seen (shakedown) |
+| `redis_oom` | Redis `maxmemory` set far too low: new events are rejected | restore `maxmemory` | unseen |
+| `worker_hung` | the worker process is frozen (SIGSTOP): no errors, no deploy, Docker still says "running" | restart the worker | unseen (added 15 Oct) |
+| `collector_hung` | the same for the collector: the stream and its metrics go silent | restart the collector | unseen (added 15 Oct) |
+| `api_down` | the API container is stopped | restart the API | unseen (added 15 Oct) |
+| `upstream_cut` | the internet path to Wikimedia is cut (the `egress` relay stops); everything we own is healthy | **do nothing** (wait or escalate): no fix on the allowlist helps | unseen (added 15 Oct) |
+
+`upstream_cut` is the test of acting when the agent should not: the symptoms look like a
+collector problem, but restarting or rolling back the collector cannot help. The collector
+reaches Wikimedia through the `egress` relay (TLS passes through untouched); the agent has no
+check on the relay, the same way it has no check on a real ISP.
 
 Random, unannounced faults: set `CHAOS_MODE=schedule` in `.env` (mean gap `CHAOS_MEAN_GAP_MIN`).
 Faults the agent does not fix are healed by the injector after `FAULT_TIMEOUT_MIN`.
@@ -65,6 +74,32 @@ is to **not** change anything.
 **The answer key** is in the `sealed` Docker volume, which only the injector mounts. To read it
 for scoring (after a session, never during):
 `docker compose exec chaos cat /sealed/ground_truth.jsonl`
+
+## Scored sessions (RQ3)
+
+```bash
+./run-session.sh rule 5 101     # our frozen rule v2, 5 hours, seed 101 (about 12 faults)
+./run-session.sh llm  5 101     # the plain LLM agent on the SAME schedule
+./run-session.sh status         # progress; the answer key stays sealed until the end
+```
+
+A session wipes the answer key, archives old incidents, starts the chosen agent at
+`AUTONOMY=act` with a fixed schedule (`CHAOS_MODE=slots`: one fault per 25-minute slot, every
+fault type once per round in a seeded order, start times jittered by up to 3 minutes, faults
+time out after 15 minutes), and runs in the background. At the end it copies the answer key
+and incidents to `sessions/<id>/`, writes `report.txt` with the scorer, puts the test bed back
+in manual mode and shows a Mac notification. Compare two agents on the same seed:
+
+```bash
+cd ops && python -m testbed_ops.score compare ../sessions/<A>/ground_truth.jsonl ../sessions/<A> \
+                                              ../sessions/<B>/ground_truth.jsonl ../sessions/<B>
+```
+
+**The plain LLM agent** (`AGENT_KIND=llm`, `ops/testbed_ops/llm_agent.py`) gets the same
+alerts, the same free evidence, the same checks and fixes, and the same safety net (OPA, the
+0.78 act threshold applied to its own stated confidence, verification and auto-revert). The
+only difference: the LLM chooses every check, when to stop, the cause, the fix and its
+confidence. No Bayesian update, no value-of-information stop.
 
 ## Autonomy levels (`AUTONOMY` in `.env`)
 

@@ -178,4 +178,37 @@ same seed.
 
 ## Changes
 
-None yet.
+None accepted yet.
+
+### Proposed 15 Oct (Shahesta + Claude), pending Nour's approval
+
+Built and smoke-tested, not yet used in any scored session. Accept or change each item, then
+this section becomes the first accepted change and the protocol is locked.
+
+1. **Open decision 1: yes, `upstream_cut` added** (correct response `none`). The collector
+   reaches Wikimedia through an `egress` relay (TLS passthrough); the fault stops the relay.
+   The agent has no check on it. Symptoms look like a collector problem; restart and rollback
+   cannot help. Unseen by construction.
+2. **Three more unseen faults**, so H3d has more than three held-out types: `worker_hung` and
+   `collector_hung` (process frozen with SIGSTOP: no errors, no deploy, container "running";
+   fix `restart:<service>`) and `api_down` (container stopped; fix `restart:api`). Unseen faults
+   become `crash_loop_worker`, `bad_config_collector`, `redis_oom`, `worker_hung`,
+   `collector_hung`, `api_down`, `upstream_cut` (7 types); seen stay `bad_release_worker`,
+   `db_lock`. Shakedowns of the plain LLM agent use seen faults only, so the unseen ones stay
+   held out for both agents.
+3. **Schedule: `CHAOS_MODE=slots` instead of exponential gaps** for scored sessions. The
+   exponential schedule skips an injection when a fault is still active, and how long a fault
+   stays active depends on the agent, so two agents with the same seed would NOT get the same
+   faults (and `score compare` would refuse them). Slots: one fault per 25-minute slot, every
+   fault type once per round in a seeded order, start jittered by 0–3 minutes,
+   `FAULT_TIMEOUT_MIN=15`, so faults never overlap and the schedule is identical whatever the
+   agents do. Replaces open decision 4's timing; about 12 faults per 5-hour session.
+4. **Setup 2 built** (`AGENT_KIND=llm`, `testbed/ops/testbed_ops/llm_agent.py`): same alerts,
+   free evidence, checks, fixes, OPA, act threshold (applied to the LLM's stated confidence),
+   verification and auto-revert; the LLM chooses checks, stopping, cause, fix and confidence.
+   Check budget 12, the same as the rule's `max_probes`.
+5. **Open decision 3, adjusted for 9 fault types:** 9 faults per type would be 81 faults, about
+   7 sessions of 5 hours per setup. Proposal: start with 2 rounds (18 faults, ~2 sessions) per
+   setup as a pilot, then decide.
+6. Scorer: answer-key events without a fault id (`schedule`, `slot_delayed`, `inject_failed`)
+   and non-incident files in a session folder (`header.json`) are ignored (test added).
