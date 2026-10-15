@@ -1,245 +1,187 @@
 <div align="center">
 
-# Incident Commander
+# Incident Commander: research repo
 
-**An autonomous SRE agent that decides when *not* to act.**
+**An AI SRE agent that decides when *not* to act: which checks to run, when to stop, and when to hand an incident to a human.**
 
-Bayesian belief updating for probe selection · OPA policy engine outside the agent · Merkle-signed evidence chain · offline-verifiable postmortems.
+Private research repo of Shahesta Salama and Nourseen Tarek (Alryada University). The public demo lives at [S2800-0/incident-commander](https://github.com/S2800-0/incident-commander).
 
-[Quickstart](#quickstart) · [What it does](#what-it-does) · [How the mechanism works](#how-the-mechanism-works) · [Architecture](#architecture) · [Roadmap](#roadmap)
+[Status](#status-15-oct-2026) · [Results](#rq1-results-final) · [Start here](#start-here-reading-order) · [Layout](#repository-layout) · [How to run](#how-to-run-things) · [Live test bed](#rq3-the-live-test-bed-pulse) · [Next](#what-comes-next) · [Rules](#rules-we-keep)
 
 </div>
 
 ---
 
-## What it does
+## Status (15 Oct 2026)
 
-Incident Commander is a decision layer above your observability stack. It watches telemetry from a target service, opens an incident autonomously when SLOs are breached, and runs a formal loop to decide what to do next:
+| Track | What it is | Status | Owner |
+|---|---|---|---|
+| **RQ1: benchmark** | Rule vs LLM agents on 73 AIOpsLab problems (detection, localization, analysis) | **Done.** 730 runs, audited, final snapshot `data/rq1-results/2026-10-15/` | Shahesta (runs), Nour (evaluation) |
+| **RQ2: act or escalate** | Simulator: when should the agent fix, wait or call a human, at each customer-impact level | Done | Shahesta |
+| **RQ3: live system** | "Pulse": our own app on real Wikipedia traffic, unannounced faults, the agent fixes or escalates | Built and frozen (12 Oct). Missing before scored sessions: plain-LLM agent baseline, unseen faults, session runner | Both. Nour owns the protocol and scorer |
+| **Paper 1** | RQ1 + RQ2 + RQ3 | Introduction drafted (`docs/paper1/`); results sections next | Both |
+| **Paper 2** | The Upgrade Paradox: a smarter LLM made the rule *worse* (rule v1, 8B → 14B: 42% → 26%); rule v2 fixes it | Next experiment: the model ladder | Shahesta + Claude |
 
-1. **Investigate** — competing root-cause hypotheses, scored by expected information gain per unit cost
-2. **Ask** — a policy engine outside the agent decides whether the proposed action is allowed
-3. **Act** — only after policy approval, over real HTTP against the target service
-4. **Verify** — from fresh telemetry collected *after* the action, not the pre-action signal
-5. **Auto-revert** — if verification fails, the agent undoes its own change
-6. **Seal** — every decision is a leaf in a Merkle tree, signed with Ed25519, offline-verifiable
+The full plan and its reasons: [`docs/study-guide/00-decision.md`](docs/study-guide/00-decision.md).
 
-The condition for autonomy is **reversibility, not confidence**. Irreversible actions never run.
+## The idea in one paragraph
 
-## Why
+An LLM is good at *proposing* causes ("the worker's new release is broken", "the database is locked") but bad at deciding how much evidence is enough. So the LLM writes competing **hypotheses**, each predicting what every check would show. A fixed **decision rule** (Bayesian updating plus value of information) then picks the check that best separates them, updates the probabilities, and **stops** when no check is worth its cost. When acting, an outside policy engine (OPA) must allow the fix, the agent verifies recovery from fresh telemetry, and reverts and escalates if the fix doesn't hold. The rule is deterministic and auditable: the same readings always give the same decision.
 
-Most AI SRE tools show an agent fixing something. This project shows an agent **refusing to act** when the proposed action is unsafe — and proving it was right to refuse.
+## RQ1 results (final)
 
-Enterprise DevOps teams cannot deploy autonomous incident response until three things are true simultaneously:
-- The agent can act on the same interfaces production actually exposes (HTTP + OpenTelemetry)
-- Every action is gated by a policy the agent cannot bypass
-- Every decision produces a receipt a third party can verify without trusting the operator
+Share of the 73 AIOpsLab problems answered correctly. qwen3 models run locally through Ollama.
 
-Incident Commander shows all three end-to-end.
+| Setup | qwen3:8b | qwen3:14b | Checks per problem (8B / 14B) | Input tokens per problem (8B / 14B) |
+|---|---|---|---|---|
+| A. Plain LLM agent (ReAct) | 12% | 18% | 16.1 / 21.5 | 42k / 59k |
+| B. LLM picks the checks | 45% | 55% | 2.2 / 0.8 | 15k / 9.7k |
+| C. Rule v1 (ours) | 42% | 26% | 2.3 / 5.5 | 3.9k / 3.2k |
+| **C2. Rule v2 (ours)** | **48%** | **52%** | 2.9 / 5.3 | 4.3k / 3.4k |
+| D. Random checks | 40% | – | 3.2 | 4.1k |
+| E. Every check | 47% | – | 25.0 | 8.4k |
 
-## Quickstart
+> **Read this before quoting any number.** 32 of the 73 problems are *detection* ("is there a fault?") and 29 of those have one. **Always answering "Yes" scores 40% overall with zero checks.** On the 41 localization + analysis problems, every setup is between 15% and 32%, and none separates from random checks (n = 41, the 95% intervals overlap). Report accuracy **per task** and include the always-"Yes" baseline. Details and the per-task table: [`data/rq1-results/2026-10-15/README.md`](data/rq1-results/2026-10-15/README.md).
 
-**Requirements:** Docker Desktop, Python 3.11+, Node 18+.
+What the results support:
+- **Cost.** Rule v2 matches "every check" at about 1/9 of the checks, and the plain LLM agent at about 1/10 (8B) to 1/17 (14B) of the input tokens, while being far more accurate than it.
+- **The Upgrade Paradox (Paper 2).** Rule v1 got worse with the stronger model; rule v2 doesn't.
+- **Not supported:** "the rule finds the root cause more accurately than an LLM choosing checks". The live system (RQ3), where we control the fault mix, is where accuracy gets tested properly.
 
-```bash
-git clone https://github.com/S2800-0/incident-commander.git
-cd incident-commander
-pip install -e .
+Charts: `docs/study-guide/img/chart-*.png` (regenerated from the final results).
+
+## Start here (reading order)
+
+1. [`docs/study-guide/README.md`](docs/study-guide/README.md): the study guide, chapters 0–10 with screenshots. Read 0, 1, 3, 4 and 9 first.
+2. [`data/rq1-results/2026-10-15/README.md`](data/rq1-results/2026-10-15/README.md): the final results and the detection caveat.
+3. [`docs/paper/RQ3_PROTOCOL.md`](docs/paper/RQ3_PROTOCOL.md): how live sessions are scored (H3a–H3d), frozen before the first scored session.
+4. [`testbed/README.md`](testbed/README.md): run the live system on your own machine.
+5. [`docs/paper1/`](docs/paper1/): Paper 1 LaTeX (`main.tex`, `intro.tex`, `numbers.tex`, `refs.bib`).
+
+## Repository layout
+
+```
+ic/bench/            RQ1: the agent on AIOpsLab
+  probes.py            check catalog (catalog v2: alias services dropped, tool errors = unavailable)
+  hypotheses.py        LLM hypothesis generation (each hypothesis predicts every check's outcome)
+  decide.py            the decision rule (Investigation, VoI, stop rule; rule v1 and v2)
+  agent.py             one investigation end to end (CATALOG_VERSION = 2)
+  baselines.py         A plain LLM (ReAct), B LLM picks, D random, E every check
+  run_aiopslab.py      runs one setup over the problems, one JSON line per run
+  analyze.py           the results table (accuracy, Wilson 95% CI, checks, tokens, Brier)
+  replay.py            offline replay of saved runs under another rule version
+ic/eval/             Nour's offline evaluation on saved runs (no cluster, no LLM unless stated)
+  calibration.py       selective prediction: accuracy when each method may abstain below a confidence
+  evidence_failure.py  how answers degrade when a share of checks "fail"
+  react_confidence.py  post-hoc confidence for the plain LLM agent (asks the same model)
+ic/rq2/              RQ2 simulator: run.py (policies across impact levels), sweep.py (robustness)
+ic/ (rest)           Phase 1 demo engine: orchestrator, OPA client, verification, evidence chain
+
+testbed/             RQ3 live system "Pulse" (Docker Compose), see its README
+  app/                 Node.js collector / worker / API (Wikimedia EventStreams → Redis → Postgres)
+  ops/testbed_ops/     chaos.py (faults + sealed answer key), agent.py (frozen rule v2 + fix choice),
+                       actions.py, probes.py, score.py (Nour's scorer), test_score.py
+  policy/              OPA Rego for allowed actions
+  prometheus/ alertmanager/ grafana/   monitoring, 9 alert rules, dashboard "Pulse test bed"
+  start-live.command / stop-live.command   one-click start/stop (macOS)
+
+data/rq1-results/    dated, checksummed result snapshots (2026-10-11, -12, -15 = final)
+docs/study-guide/    the study guide + tools/make_charts.py, tools/audit_runs.py
+docs/paper/          RQ3_PROTOCOL.md, EXPERIMENT_PLAN.md
+docs/paper1/         Paper 1 LaTeX
+infra/               AWS benchmark host (CloudFormation bench-host.yaml, bench.sh runbook, tunnel.sh)
+tests/               pytest for the rule, catalog, baselines, eval tools
+mock/ server/ console/ policy/ corpus/   Phase 1 demo (see the end of this file)
 ```
 
-Then double-click `start.command` from Finder (macOS), or run:
+## How to run things
 
+Setup once: Python 3.11+, then `pip install -e .` from the repo root.
+
+**Tests** (should all pass before any PR):
 ```bash
-./start.command
+python3 -m pytest -q                              # 110 tests: rule, catalog, baselines, eval
+cd testbed/ops && python3 -m pytest -q            # 20 tests: the RQ3 scorer
 ```
 
-This launches, each in its own Terminal tab:
+**Read the RQ1 results** (no AWS, no LLM):
+```bash
+gunzip -k data/rq1-results/2026-10-15/full_rq1.jsonl.gz
+python3 -m ic.bench.analyze data/rq1-results/2026-10-15/full_rq1.jsonl          # the table above
+python3 docs/study-guide/tools/audit_runs.py <dir with full_rq1.jsonl + full_progress.txt>
+python3 docs/study-guide/tools/make_charts.py <same dir>                         # rewrites docs/study-guide/img/
+```
 
-- OPA policy engine (Docker container, port 8181)
-- Backend orchestrator + SLO detector (FastAPI on port 8000)
-- Target service — the mock `shop-svc` (FastAPI on port 9001)
-- Console (React + Vite on port 5173)
+**Offline evaluation** on the final file:
+```bash
+python3 -m ic.eval.calibration      data/rq1-results/2026-10-15/full_rq1.jsonl.gz --out out/
+python3 -m ic.eval.evidence_failure data/rq1-results/2026-10-15/full_rq1.jsonl.gz --out out/
+python3 -m ic.bench.replay          ...   # re-decide saved runs under another rule version
+```
 
-The console opens automatically in your browser. On the **Live** tab, click **▶ Start traffic (60 rps)**, then click any fault-injection scenario to watch the pipeline fire.
+**RQ2 simulator:**
+```bash
+python3 -m ic.rq2.run --n 2000
+python3 -m ic.rq2.sweep --n 1200 --impact 4
+```
 
-To stop everything cleanly: `./stop.command`.
+**RQ1 benchmark on AWS** (Shahesta's laptop, it holds the AWS profile; the model runs on the laptop, the cluster on an AWS r7i.xlarge, joined by an SSH-over-SSM tunnel). `infra/bench.sh` is the runbook:
+```bash
+~/ic-bench.sh status | fetch | pause | night <n>
+```
+All nights are finished; the host is stopped with its disk kept (about $0.40/day). Chapter 10 of the study guide explains every command, and chapter 5 lists every problem we hit and how it was fixed.
 
-## Try it
+## RQ3: the live test bed (Pulse)
 
-Once the console is open, four chaos scenarios exercise the four outcome patterns:
+A small real system: the live Wikimedia edit stream (about 10–25 events/s, real day/night cycles) → Node.js collector → Redis stream → worker → Postgres → API, with Prometheus, Alertmanager and Grafana. A fault injector breaks it at random and writes the answer to a **sealed** volume the agent can't read. Alertmanager calls the agent, the agent investigates with the frozen rule v2, and either fixes (only if OPA allows it and P(fix works) ≥ 0.78, then verifies and reverts if needed) or escalates with a one-command approve.
 
-| Scenario | Expected outcome | What it proves |
+```bash
+cd testbed && cp .env.example .env && docker compose up -d --build     # or double-click start-live.command
+```
+
+| What | Where |
+|---|---|
+| Grafana | http://localhost:3301 (dashboard "Pulse test bed") |
+| Prometheus alerts | http://localhost:9390/alerts |
+| API | http://localhost:3300/api/top |
+| Agent | http://localhost:8380/incidents, decisions in `testbed/incidents/*.json` |
+
+Faults: `bad_release_worker`, `crash_loop_worker`, `bad_config_collector`, `db_lock`, `redis_oom` (the first and `db_lock` were used in the shakedown, so they count as **seen**). Autonomy levels: `shadow`, `suggest`, `act` (`AUTONOMY` in `.env`). Scoring:
+```bash
+docker compose exec chaos cat /sealed/ground_truth.jsonl > ground_truth.jsonl
+cd testbed/ops && python -m testbed_ops.score ../ground_truth.jsonl ../incidents
+python -m testbed_ops.score compare KEY_A INCIDENTS_A KEY_B INCIDENTS_B     # paired, McNemar
+```
+Full guide: [`testbed/README.md`](testbed/README.md). Protocol: [`docs/paper/RQ3_PROTOCOL.md`](docs/paper/RQ3_PROTOCOL.md).
+
+## What comes next
+
+| When | What | Who |
 |---|---|---|
-| **Bad code release** | Autonomous rollback → verified recovery | Reversible actions execute end-to-end |
-| **Config release + hidden dependency** | Rollback → verification fails → auto-revert → escalate | The system undoes its own action when the fix doesn't hold |
-| **Two dependencies degrade together** | Abstain → escalate | Refusing when evidence cannot separate causes is a designed output |
-| **orders-db saturation** | Failover proposed → **OPA DENY** → escalate | Irreversible actions are denied before they can execute |
+| Now | **Paper 2 model ladder:** qwen3 0.6B / 1.7B / 4B / 8B / 14B write hypotheses for the 73 problems; rule v1 vs v2 replayed offline on the saved "every check" readings; scored **per task** with the always-"Yes" baseline. Laptop only, about 4–6 h | Shahesta + Claude |
+| Now | RQ1 write-up with per-task numbers (the detection caveat above); calibration and evidence-failure figures from `ic/eval` on the final file | Nour |
+| ~3 days | **Live benchmark, local:** a plain-LLM agent on the test bed (the comparison for H3a–H3c), 3–4 new faults the agent has never seen (H3d), a session runner. First scored session about 18–19 Oct | Shahesta + Claude; Nour locks the protocol |
+| From ~26 Oct | **Mentor-scale version on AWS:** OWASP Juice Shop as a second app, Locust load tests shaped by real traffic traces, node exporter (CPU/RAM) and NVIDIA DCGM (GPU) dashboards, Kubernetes. About a week once compute is available. We now have a 4-vCPU **Spot** quota for G/VT instances in **eu-north-1 (Stockholm)**, enough for one g4dn/g5/g6.xlarge GPU machine | Both |
 
-Each scenario completes in 15-30 seconds. Between runs, click **⟲ Reset environment**.
+## Rules we keep
 
-## How the mechanism works
+- **Freeze before measuring.** Rule v2 and the test-bed agent are frozen (tag `testbed-agent-frozen-1`). Any change afterwards is reported. Every result records `rule_version`, `catalog_version` and the model.
+- **Audit before trusting.** Run `audit_runs.py` after every fetch. A measurement bug (two broken checks) once inflated results, and 201 runs were re-run because of it.
+- **Report honestly.** Per-task accuracy with confidence intervals, trivial baselines included, and negative results stated plainly.
+- **Results are snapshots.** Never edit a dated folder under `data/rq1-results/`; add a new one with its own `SHA256SUMS` and README.
+- **No secrets in the repo.** Snapshots are scanned for keys, emails and personal paths before committing. `.env` files stay local.
+- **Confidential work stays out.** The possible patent idea is not in this repo and must not go into decks, talks or papers until we decide about filing.
 
-### Bayesian belief updating
+## Branches and workflow
 
-Each hypothesis about the root cause carries a probability. When a probe returns evidence, the system compares the observation against what each hypothesis predicted:
+- `main` and `research/voi-benchmark` are kept identical. Work on a branch, open a PR into `main`, and after merging, `research/voi-benchmark` is fast-forwarded to match.
+- Conventional commits (`feat(eval): …`, `fix(score): …`, `data: …`, `docs: …`).
+- Run both test suites before a PR.
 
-- Predictions that matched → posterior probability **up**
-- Predictions that mismatched → hypothesis **eliminated**
+## Phase 1 demo (the original system)
 
-There is no learned model — the policy is deterministic Bayesian updating over structured hypothesis predictions. Same input, same output. Anyone can audit the logic by reading the code.
+The repo still contains the Phase 1 demo: a mock `shop-svc`, an SLO detector, the investigation loop, OPA, verification with auto-revert, and a Merkle + Ed25519 sealed postmortem (`python verify.py results/<id>.postmortem.json`). Requirements: Docker Desktop, Python 3.11+, Node 18+. Start it with `./start.command` (OPA on 8181, backend on 8000, `shop-svc` on 9001, console on 5173) and stop it with `./stop.command`. On the console's **Live** tab, start traffic and trigger one of four scenarios: bad release → rollback, hidden dependency → auto-revert, two causes → abstain, database saturation → OPA deny. Study guide chapter 2 walks through it with screenshots.
 
-### Value-of-Information probe selection
+## License and authors
 
-Not every check is worth running. The system scores each candidate probe by expected information gain divided by cost, and picks the argmax over probes that haven't run yet. The stop rule is: continue while uncertainty remains **and** a discriminating check still exists.
-
-```
-next_check = argmax( expected_information_gain / cost )
-```
-
-Zero LLM tokens in the decision path.
-
-### Policy-as-code outside the agent
-
-Every state-changing action is gated by an [OPA](https://www.openpolicyagent.org/) engine running in its own Docker container, on its own port, with policies written in Rego. The backend calls OPA over HTTP with a policy input document. The agent has no code path to write or bypass these rules; if OPA is unreachable, the backend fails closed.
-
-Three action classes exist: rollback, canary, and intervention. Each is gated by different envelope constraints (blast radius, reversibility, traffic percentage, duration).
-
-### Merkle + Ed25519 evidence chain
-
-Every decision — SLO breach, probe result, policy verdict, action outcome, verification result — is a leaf in a Merkle tree. The root is signed with Ed25519 over `(verdict || root || timestamp)`. A standalone verifier reads only the sealed postmortem file:
-
-```bash
-python verify.py results/LIVE-0073.postmortem.json
-# → VERIFIED · exit 0
-```
-
-Tamper with any leaf, the same script prints `TAMPERED · exit 1`.
-
-## Architecture
-
-```
-Live service (mock shop-svc)
-        │  OpenTelemetry
-        ▼
-SLO detector  ──▶  Investigation loop  ──▶  Policy engine (OPA, outside agent)
-                          │                          │
-                          │                       ALLOW / DENY
-                          │                          │
-                          ▼                          ▼
-                   Sealed evidence  ◀── Execute action (real HTTP)
-                          │                          │
-                          │                          ▼
-                          │                    Verification
-                          │                          │
-                          ▼                          ▼
-                    Merkle + Ed25519 audit chain (verify.py)
-```
-
-Ten engine modules · 15 unit tests · 14 policy tests · 63 end-to-end trials across five outcome patterns.
-
-### Repository layout
-
-```
-ic/                 orchestrator, policy client, evidence chain, verify.py
-├── live/           SLO detector, live controller, verification, probes
-└── live_trials.py  63-trial harness across five outcome patterns
-
-mock/               target service (shop-svc) + load generator
-server/             FastAPI backend (orchestrator + REST + WebSocket)
-console/            React + Vite console (LIVE tab + Console tab)
-deck/               presentation deck (static HTML, self-contained)
-policy/             Rego policies
-
-corpus/             12 recorded incident bundles (replay mode)
-tests/              pytest suites for orchestrator + policy + live loop
-
-start.command       one-click startup (macOS Finder-double-click)
-stop.command        one-click shutdown
-```
-
-## Evidence
-
-Two levels of proof exist beyond a single demo run:
-
-**Ablation** — turn the mechanism off and measure the collapse:
-```
-                            ON     OFF
-Accuracy on hardest cases  100%    0%
-False-positive rollbacks     0%   33%
-Brier score               0.004  0.287
-```
-
-`OFF` scores 0% (not 50%) because the discriminating signal is reachable only through a check. Turn checks off and it is genuinely gone — the ablation measures the policy, not the model.
-
-**63-trial harness** — five outcome patterns, all end-to-end through the same code:
-
-```bash
-python -m ic.live_trials
-```
-
-Results:
-- Confirmed → acted → verified: **25 / 25**
-- Won by exclusion → verification caught → reverted: **10 / 10**
-- Reversible non-rollback action proposed: **9 / 9**
-- Evidence insufficient → abstained: **5 / 5**
-- Irreversible action proposed → policy denied: **14 / 14**
-
-**Ours vs. exhaustive baseline (same 25 confirmed trials):**
-| | Ours | Exhaustive |
-|---|---|---|
-| Resolution rate | 100% | 100% |
-| Probes per incident | 1.2 | 2.8 |
-| Harmful actions | 0 | 0 |
-| Unreverted changes | 0 | 0 |
-
-Same accuracy at 43% of the probing cost.
-
-## Stack
-
-- **Python 3.11+ · FastAPI · uvicorn · httpx** — backend and target service
-- **Open Policy Agent + Rego** — external policy engine (Docker sidecar)
-- **OpenTelemetry** — telemetry ingestion format
-- **React · Vite · TypeScript** — console
-- **cryptography** — Ed25519 signatures
-- **pytest** — unit and integration tests
-
-No LLM in the decision path. LLM support exists as an opt-in triage assist behind a two-check anti-hallucination filter (`IC_USE_LLM=1`), but the metrics above are produced without it.
-
-## Roadmap
-
-**Shipped:**
-- Investigation loop with Value-of-Information probe selection
-- OPA + Rego policy engine, running outside the agent
-- Verification loop with recovery band and auto-revert
-- Customer Impact Scoring (P0–P3)
-- OpenTelemetry ingestion + SLO breach detector (with hysteresis)
-- 63-trial end-to-end harness across five outcome patterns
-- Real HTTP execution against a live target service
-- Merkle + Ed25519 audit chain, offline verifier
-- Probe catalog expansion — VoI 1.2 vs exhaustive 2.8 probes per incident
-
-**Planned:**
-- Formal Expected Information Gain under Shannon entropy (currently a divergence heuristic)
-- Kubernetes adapter — replace `mock/shop_svc.py` with a real `kubectl` integration
-- Wider policy corpus — compliance, data residency, multi-tenant scoping
-- Multi-region deployment with per-region SLO detectors
-- Datadog / Grafana / Prometheus telemetry adapters
-
-## Documentation
-
-- [`docs/SRS.md`](docs/SRS.md) — Software Requirements Specification with traceability
-- [`docs/RAI.md`](docs/RAI.md) — Responsible AI governance and safety
-- [`docs/ROI.md`](docs/ROI.md) — Business impact and value tiers
-- [`docs/ROADMAP.md`](docs/ROADMAP.md) — Detailed roadmap
-- [`docs/SUSTAINABILITY.md`](docs/SUSTAINABILITY.md) — Waste-reduction metrics
-
-## Contributing
-
-Issues and pull requests welcome. The project follows conventional commits and standard pytest discipline. Run `pytest` before opening a PR.
-
-## License
-
-MIT — see `LICENSE`.
-
-## Authors
-
-Shahesta Salama · Nourseen Tarek · Alryada University
+MIT, see `LICENSE`. Shahesta Salama · Nourseen Tarek · Alryada University.

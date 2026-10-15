@@ -2,7 +2,7 @@
 
 A guide for Shahesta and Nour to everything built and run so far, and what comes next. Each chapter is short and has pictures. Read them in order the first time.
 
-> **Status (11 Oct 2026):** RQ1 benchmark: Nights 1–4 are done. An audit found a measurement bug (two "broken" checks), so **Nights 5–6 are re-running the 201 affected runs**. The numbers in chapter 4 are **provisional** until those nights finish, and the charts are regenerated afterwards.
+> **Status (15 Oct 2026):** RQ1 benchmark: **all nights are finished** (730 runs, audited, final snapshot `data/rq1-results/2026-10-15/`). The charts are regenerated from the final results. **Before quoting numbers, read the detection caveat** in that snapshot's README: always answering "Yes" already scores 40%. Chapter 4's tables are from before the re-runs; the snapshot README has the final ones.
 
 | # | Chapter | What you'll learn |
 |---|---|---|
