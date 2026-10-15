@@ -1,0 +1,15 @@
+# Local stand-in for the AWS cluster: one k3s server (ops) + two agents labelled like the real
+# nodes. The GPU node has no GPU locally; its pods fall back to Ollama on the Mac.
+apiVersion: k3d.io/v1alpha5
+kind: Simple
+metadata: { name: ic }
+servers: 1
+agents: 2
+image: rancher/k3s:v1.31.5-k3s1
+options:
+  k3s:
+    # Traefik stays enabled: the ingress gives logged-in Juice Shop users cookie stickiness (per-pod SQLite)
+    nodeLabels:
+      - { label: role=ops, nodeFilters: ["server:0"] }
+      - { label: role=apps, nodeFilters: ["agent:0"] }
+      - { label: role=gpu, nodeFilters: ["agent:1"] }

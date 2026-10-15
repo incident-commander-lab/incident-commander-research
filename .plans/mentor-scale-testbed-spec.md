@@ -23,7 +23,7 @@ changes) and are not blocked by this work.
 | Platform | **k3s** on our own EC2 machines; locally **k3d** (k3s in Docker) | Real Kubernetes (pods, rollouts, scaling, kubelet/cAdvisor, DCGM) without EKS's $73/month; moving to EKS later is mostly config |
 | Region / pricing | **eu-north-1**, all **Spot**, all nodes in **one AZ** (1a or 1b; g6 is not offered in 1c) | GPU quota is Spot-only there (4 vCPU); one AZ avoids cross-AZ data charges |
 | GPU load | A **real AI feature**: "Ask about this product" chat, answered by an LLM on the GPU | Load tests then push the GPU to 100% for a real reason, and GPU faults are real incidents |
-| Agent's LLM | **Same GPU, separate slot**: its own Ollama instance with `qwen3:8b` (the exact Q4_K_M artifact used in RQ1/RQ3), memory reserved; chat uses a second Ollama instance | Agent can't be starved of GPU memory by user load; model identical to every earlier experiment. Compute is still shared (reported as such) |
+| Agent's LLM | **Same GPU, separate slot**: its own Ollama instance with `qwen3:8b` (the exact Q4_K_M artifact used in RQ1/RQ3), started **first** and kept loaded; chat uses a second Ollama instance started after it | Model identical to every earlier experiment. Kubernetes time-slicing gives **no** GPU-memory isolation (verified, §12), so the slot is protected by start order: Ollama sizes itself to the VRAM that is free when it loads, so a later chat instance offloads to CPU instead of taking the agent's memory. Compute is still shared (reported as such). Fallback if the shakedown shows interference: MPS sharing with a per-client memory limit |
 | Load generator | On a **separate node** (the ops node), never on the app node | Saturating the app must not starve Locust, Prometheus or the agent |
 | Traffic | All four: (1) Locust users shaped by a **real public trace**; (2) **replay of real public HTTP logs**; (3) **labelled security dataset** replay; (4) the **live Wikipedia stream** (Pulse) | Realistic mix; (3) gives ground truth for security incidents |
 | Time scale | **1 real day → 1 hour** (24×) | Each session sees several full daily cycles |
@@ -56,11 +56,16 @@ changes) and are not blocked by this work.
 - **Why three nodes:** the apps node is the one we saturate; the ops node keeps monitoring, the
   agent and the load generator healthy; the GPU node is fixed by the quota (4 vCPU = one xlarge).
 - **GPU sharing:** NVIDIA device plugin with **time-slicing (2 replicas)** so both Ollama pods get
-  `nvidia.com/gpu: 1`. Memory separation via each Ollama's model size and `OLLAMA_NUM_PARALLEL`
-  / context limits (L4 24 GB: agent 8B Q4 ≈ 6 GB + KV, chat 4B ≈ 3 GB + KV × parallel).
-- **AMI:** AWS Deep Learning Base OSS NVIDIA Driver GPU AMI (Ubuntu 22.04) for the GPU node
-  (driver + NVIDIA container toolkit preinstalled; k3s auto-detects the NVIDIA runtime); Ubuntu
-  24.04 for the others. Looked up via SSM parameters (allowed by `ic-gpu-stockholm`).
+  `nvidia.com/gpu: 1` (pods also need `runtimeClassName: nvidia`). Time-slicing does **not**
+  isolate GPU memory, and the L4 has no MIG, so: agent Ollama starts first with a warm-up request
+  and `OLLAMA_KEEP_ALIVE=-1`; the chat Ollama starts after it (init container waits for the agent's
+  model to be resident). L4 24 GB: agent 8B Q4 ≈ 6 GB + KV, chat 4B ≈ 3 GB + KV × parallel.
+  DCGM reports per GPU, not per pod (two pods share it), so GPU panels are per device.
+- **AMI:** AWS Deep Learning Base OSS NVIDIA Driver GPU AMI, **Ubuntu 24.04**, for the GPU node
+  (driver + NVIDIA container toolkit preinstalled; k3s detects the NVIDIA runtime when it starts,
+  but the **NVIDIA device plugin is still needed** to advertise `nvidia.com/gpu`); Ubuntu 24.04 for
+  the others. Both resolved via SSM parameters in eu-north-1 on 15 Oct (ami-0b00ba21bb3194a5a,
+  ami-09d835910a77f135c; always resolved at launch, never hard-coded).
 - **Infra as code:** one CloudFormation stack `ic-gpu-<session>` (3 Spot instances, security group
   with **no inbound rules**, SSM role, idle-stop alarm, tags `project=incident-commander-gpu`),
   created per session and **deleted at the end**. k3s joins via a token passed in user data.
@@ -80,8 +85,8 @@ rollback work the same way).
 | Source | What | Mapping onto our apps | Ground truth |
 |---|---|---|---|
 | (1) Locust users | Journeys: browse → search → product → ask assistant (≈10% of users) → basket → checkout | Rate follows **Wikipedia hourly page views** (public, CC0) for a fixed week, 24× compressed, scaled to peak ~200 users / ~100 req/s (Locust `LoadTestShape`) | n/a |
-| (2) Public log replay | Timing and request mix from a public-domain web server access log | Path classes (static / listing / detail / search / errors) mapped to Juice Shop endpoints; original timing compressed like (1) | n/a |
-| (3) Labelled security replay | A public, labelled dataset of normal vs malicious web requests (academic use) | Replayed in **bursts at scheduled times** (sealed in the answer key), against Juice Shop's own endpoints only, inside our private cluster | Labels + burst schedule → expected response: **escalate, propose block** |
+| (2) Public log replay | Timing and request mix from a public web server access log (e.g. the 1995 NASA HTTP logs, freely redistributable; licence re-checked at selection) | Path classes (static / listing / detail / search / errors) mapped to Juice Shop endpoints; original timing compressed like (1) | n/a |
+| (3) Labelled security replay | A public, labelled dataset of normal vs malicious web requests. Candidate: CSIC 2010 (labelled normal/anomalous requests to an e-commerce app, ~36k normal + ~25k anomalous); **its licence was not found online, so confirm with the publisher before use**, or pick another labelled set | Replayed in **bursts at scheduled times** (sealed in the answer key), against Juice Shop's own endpoints only, inside our private cluster | Labels + burst schedule → expected response: **escalate, propose block** |
 | (4) Live stream | Wikipedia EventStreams (Pulse, unchanged) | Pulse pipeline | as today |
 
 Dataset choice and licences are checked before use and written into `testbed/traffic/README.md`.
@@ -91,9 +96,9 @@ All replays target only our own cluster; nothing leaves it except Pulse's stream
 
 | Fault | How (real, under load) | Correct response | Group |
 |---|---|---|---|
-| `cpu_saturation_shop` | Locust surge (2.5× the trace) on Juice Shop with 1 replica | `scale_out:juice-shop` | unseen |
+| `cpu_saturation_shop` | Locust surge (2.5× the trace) of **anonymous** browsing/search on Juice Shop with 1 replica | `scale_out:juice-shop` | unseen |
 | `memory_leak_assistant` | Assistant release that keeps every answer in memory | `rollout_undo:assistant` (OOMKilled → restarts) | unseen |
-| `gpu_memory_exhausted` | Assistant config release raising context × parallel past the L4's memory → Ollama-chat errors | `rollout_undo:assistant` or `rate_limit:assistant` (both accepted, listed in the key) | unseen |
+| `gpu_memory_exhausted` | Assistant config release asking for a very large context per request → Ollama reloads the chat model, it no longer fits in free VRAM and **offloads layers to CPU** (verified Ollama behaviour, §12): GPU memory full, GPU-node CPU at 100%, chat latency explodes (not errors) | `rollout_undo:assistant` or `rate_limit:assistant` (both accepted, listed in the key) | unseen |
 | `attack_burst` (week 2) | Labelled-malicious replay burst | escalate, propose `block_client` (needs approval) | security |
 | Pulse's 9 faults (week 2) | Ported to Kubernetes (e.g. `upstream_cut` stays "do nothing") | as in Compose | seen / unseen as in Compose |
 | Spot interruption | Natural | do nothing / escalate; session marked interrupted | natural |
@@ -164,12 +169,42 @@ first scored cluster sessions.
 | Spot GPU unavailable / reclaimed | Try 1a then 1b; session marked interrupted, resumed on a new node; recorded backup for the showing |
 | Two Ollama instances contend for GPU compute | Memory is separated, compute is not: measure agent latency with and without chat load and report it |
 | Chat model too slow / too fast to show saturation | Tune model size (qwen3:1.7b / 4b) and assistant concurrency in the shakedown, then freeze before scored sessions |
-| Juice Shop's CPU profile doesn't respond to scale-out | Verified on day 1 locally (single-threaded Node + per-replica CPU limit makes scale-out effective) |
+| Juice Shop keeps its data in an **embedded SQLite per pod** (verified, §12): with several replicas, a user registered on one pod does not exist on another | Journeys are mostly anonymous (browse, search, product, assistant) and spread across replicas; logged-in journeys (basket, checkout) get **cookie stickiness** at the ingress (k3s's Traefik, kept enabled). Measured on day 1 that scale-out actually relieves CPU |
+| Control plane on a Spot node | The ops node (k3s server) is Spot too; if reclaimed the session ends (marked interrupted). t3 reclaim rates are low; accepted for cost |
+| t3 Spot surplus-credit charges | AWS defaults T3 to *unlimited* and recommends **standard** for Spot (verified); set explicitly in the launch template |
 | Ported/new checks behave differently from RQ1 | Same templates; new metric checks unit-tested; shakedown on seen faults only |
 | Labelled dataset doesn't map well to Juice Shop | Choose the dataset in week 2 after a mapping check; security stays out of week 1 |
 | One-week deadline | Week-1 must-haves only; everything else is week 2 |
 
-## 11. Not in scope (for now)
+## 11. Alternatives considered (and why not)
+
+| Option | Why not chosen |
+|---|---|
+| EKS | +$73/month control-plane fee (≈ 4× the whole Spot stack); k3s gives the same Kubernetes API for the demo |
+| Docker Compose | No pods/rollouts/scaling: weaker "larger scale" story; scale-out would be fake |
+| kube-prometheus-stack (operator) | Heavier (memory) for the laptop and the t3 node; plain Prometheus + Grafana charts give the same metrics (node-exporter, kube-state-metrics, kubelet/cAdvisor) |
+| vLLM for serving (priority scheduling) | Would give a true priority lane, but it is a different model artifact from the Ollama `qwen3:8b` used in RQ1/RQ3, so results would not compare |
+| MPS GPU sharing | Real memory limits per client, but adds a daemon and less-proven Ollama compatibility; kept as the fallback if start-order protection fails |
+| Single Ollama serving both models | Ollama may unload the agent's model under memory pressure; two instances keep the agent's model resident |
+
+## 12. Verification log (15 Oct 2026)
+
+| Claim | Check | Result |
+|---|---|---|
+| Spot prices and stack cost | Live `describe-spot-price-history`, eu-north-1 | g6.xlarge $0.16–0.18, m7i.xlarge $0.039–0.045, t3.large $0.016–0.020 → ~$0.23–0.26/h incl. EBS ✔ |
+| g6 availability | Spot price history by AZ | Offered in 1a/1b only, not 1c → one AZ (1a or 1b) ✔ |
+| Quotas | Service Quotas API | G/VT Spot 4 vCPU; standard Spot 32; on-demand G 0 → GPU must be Spot ✔ |
+| AMIs exist in Stockholm | SSM public parameters | DLAMI base NVIDIA driver Ubuntu 24.04 and Ubuntu 24.04 found ✔ |
+| k3s + NVIDIA | Docs/community | Runtime auto-detected at k3s start; RuntimeClass `nvidia`; **device plugin still required** (spec corrected) |
+| Time-slicing memory | AWS EKS docs | **No memory isolation**; g5/g6 have no MIG (spec corrected: start-order protection, MPS fallback) |
+| Ollama when VRAM is short | Community docs | Offloads layers to CPU, throughput collapses (spec corrected: GPU-memory fault shows as latency + CPU, not errors) |
+| Juice Shop metrics / storage | Official docs | Prometheus `/metrics` on port 3000 ✔; embedded SQLite per pod (spec corrected: anonymous journeys + cookie stickiness) |
+| t3 Spot credits | AWS docs | Default unlimited; AWS recommends standard for Spot (spec: set explicitly) |
+| Labelled dataset licence | Publisher page search | CSIC 2010 licence not found → confirm before use (week 2) |
+| Local tooling | Installed | k3d 5.9.0, helm 4.3.1, kubectl 1.36.1; chart versions prometheus 29.37.0, grafana 10.5.15; images juice-shop v20.3.0, rancher/k3s v1.31.5-k3s1 exist ✔ |
+| Laptop capacity | `docker info`, `df` | Docker 11.7 GB RAM (≈ 6 GB used by the Hadoop/Cassandra containers), **9.4 GB disk free**: enough for the local cluster, tight |
+
+## 13. Not in scope (for now)
 
 EKS; on-demand GPU (quota 0); public dashboards; autonomous security blocking; multi-region;
 changing the frozen decision rule.
