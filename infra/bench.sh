@@ -56,11 +56,12 @@ wait_ssm() {
 }
 
 # --- credit guard -------------------------------------------------------------
-# AWS credits granted to the account (Billing console -> Credits). Put the total ever granted in
-# ~/.ic-credits as CREDITS_TOTAL=<dollars>; remaining = that minus all credits used so far.
+# Credits left: read from the Free Tier API (exact, needs the ic-gpu-stockholm policy); fallback:
+# ~/.ic-credits CREDITS_TOTAL=<dollars granted> minus all credits used so far (Cost Explorer).
 CREDIT_FLOOR=${CREDIT_FLOOR:-15}   # refuse to start paid work below this many dollars left
 credit_report() {   # prints "used_credits usage_month remaining|unknown"; one Cost Explorer call ($0.01)
-  local J; J=$(aws_ ce get-cost-and-usage --time-period "Start=2025-10-01,End=$(date -u -v+1d +%F 2>/dev/null || date -u -d tomorrow +%F)" \
+  local J EXACT; EXACT=$(aws_ freetier get-account-plan-state --query 'accountPlanRemainingCredits.amount' --output text 2>/dev/null || true)
+  J=$(aws_ ce get-cost-and-usage --time-period "Start=2025-10-01,End=$(date -u -v+1d +%F 2>/dev/null || date -u -d tomorrow +%F)" \
     --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=RECORD_TYPE --output json 2>/dev/null) || { echo "? ? unknown"; return; }
   CREDITS_TOTAL=""; [ -f "$HOME/.ic-credits" ] && . "$HOME/.ic-credits"
   python3 -c '
@@ -72,7 +73,9 @@ for i,m in enumerate(d["ResultsByTime"]):
         if g["Keys"][0]=="Credit": used-=a
         if g["Keys"][0]=="Usage" and i==len(d["ResultsByTime"])-1: month+=a
 t=sys.argv[2]
-print(f"{used:.2f} {month:.2f} " + (f"{float(t)-used:.2f}" if t else "unknown"))' "$J" "${CREDITS_TOTAL:-}"
+e=sys.argv[3]
+left=f"{float(e):.2f}" if e.replace(".","",1).isdigit() else (f"{float(t)-used:.2f}" if t else "unknown")
+print(f"{used:.2f} {month:.2f} {left}")' "$J" "${CREDITS_TOTAL:-}" "${EXACT:-}"
 }
 credit_guard() {    # stop before paid work if the credits are nearly gone (override: FORCE=1)
   local R; read -r USED MONTH LEFT <<< "$(credit_report)"
