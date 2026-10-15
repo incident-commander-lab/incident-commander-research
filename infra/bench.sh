@@ -12,6 +12,7 @@
 #   ~/ic-bench.sh watch     status, refreshed every 5 min (Ctrl-C to stop watching; the run continues)
 #   ~/ic-bench.sh redo <text>  forget results whose problem name contains <text>, so the next night re-runs them
 #   ~/ic-bench.sh fetch     copy results to the laptop
+#   ~/ic-bench.sh hostrun <s> <script>  run a bash script on the machine (starts it if stopped)
 #   ~/ic-bench.sh table     results table (after fetch)
 #   ~/ic-bench.sh pause     stop tunnel/model/keep-awake and stop the AWS machine (disk kept)
 #   ~/ic-bench.sh down      fetch, then delete the AWS stack ($0/day)
@@ -249,6 +250,11 @@ os.rename(p, p + '.before-redo')
 open(p, 'w').writelines(json.dumps(r) + '\\n' for r in keep)
 print(f'removed {len(rows) - len(keep)} results matching $2; the next night command re-runs them')
 PY"
+  ;;
+hostrun)
+  # hostrun <timeout-seconds> <local script>: run a bash script on the machine as ubuntu (starts it if stopped)
+  [ -f "${3:-}" ] || { echo "usage: ~/ic-bench.sh hostrun <seconds> <script>"; exit 1; }
+  ensure_running; onhost "$2" "$3"
   ;;
 status)
   ID=$(instance_id); echo "AWS machine: ${ID:-none} ($( [ -n "$ID" ] && state "$ID" || echo -))"
