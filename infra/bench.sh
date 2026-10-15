@@ -12,6 +12,7 @@
 #   ~/ic-bench.sh watch     status, refreshed every 5 min (Ctrl-C to stop watching; the run continues)
 #   ~/ic-bench.sh redo <text>  forget results whose problem name contains <text>, so the next night re-runs them
 #   ~/ic-bench.sh fetch     copy results to the laptop
+#   ~/ic-bench.sh credits   AWS credits used / left (nights refuse to start below $15 left)
 #   ~/ic-bench.sh hostrun <s> <script>  run a bash script on the machine (starts it if stopped)
 #   ~/ic-bench.sh table     results table (after fetch)
 #   ~/ic-bench.sh pause     stop tunnel/model/keep-awake and stop the AWS machine (disk kept)
@@ -52,6 +53,35 @@ wait_ssm() {
   printf 'waiting for the machine'
   for _ in $(seq 1 60); do host 30 'echo SSM_READY' | grep -q SSM_READY && { echo " ready"; return; }; printf .; sleep 10; done
   echo; echo "machine did not answer — try again in a few minutes"; exit 1
+}
+
+# --- credit guard -------------------------------------------------------------
+# AWS credits granted to the account (Billing console -> Credits). Put the total ever granted in
+# ~/.ic-credits as CREDITS_TOTAL=<dollars>; remaining = that minus all credits used so far.
+CREDIT_FLOOR=${CREDIT_FLOOR:-15}   # refuse to start paid work below this many dollars left
+credit_report() {   # prints "used_credits usage_month remaining|unknown"; one Cost Explorer call ($0.01)
+  local J; J=$(aws_ ce get-cost-and-usage --time-period "Start=2025-10-01,End=$(date -u -v+1d +%F 2>/dev/null || date -u -d tomorrow +%F)" \
+    --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=RECORD_TYPE --output json 2>/dev/null) || { echo "? ? unknown"; return; }
+  CREDITS_TOTAL=""; [ -f "$HOME/.ic-credits" ] && . "$HOME/.ic-credits"
+  python3 -c '
+import json,sys
+d=json.loads(sys.argv[1]); used=0.0; month=0.0
+for i,m in enumerate(d["ResultsByTime"]):
+    for g in m["Groups"]:
+        a=float(g["Metrics"]["UnblendedCost"]["Amount"])
+        if g["Keys"][0]=="Credit": used-=a
+        if g["Keys"][0]=="Usage" and i==len(d["ResultsByTime"])-1: month+=a
+t=sys.argv[2]
+print(f"{used:.2f} {month:.2f} " + (f"{float(t)-used:.2f}" if t else "unknown"))' "$J" "${CREDITS_TOTAL:-}"
+}
+credit_guard() {    # stop before paid work if the credits are nearly gone (override: FORCE=1)
+  local R; read -r USED MONTH LEFT <<< "$(credit_report)"
+  echo "AWS credits: used \$$USED so far, this month's usage \$$MONTH, left: \$$LEFT"
+  [ "$LEFT" = "unknown" ] && { echo "  (set CREDITS_TOTAL in ~/.ic-credits to track what is left)"; return; }
+  if python3 -c "import sys; sys.exit(0 if float('$LEFT') < float('$CREDIT_FLOOR') else 1)"; then
+    [ "${FORCE:-0}" = 1 ] && { echo "  below \$$CREDIT_FLOOR, continuing because FORCE=1"; return; }
+    echo "  STOP: less than \$$CREDIT_FLOOR of credits left. Add credits first, or re-run with FORCE=1."; exit 1
+  fi
 }
 
 ensure_running() {
@@ -209,7 +239,7 @@ night)
     6) MODEL=qwen3:14b; POLICIES="voi voi2 llm_choose";;                     # catalog v2 re-runs + 14B LLM-chooser
     *) echo "usage: ~/ic-bench.sh night 1|2|3|4|5|6"; exit 1;;
   esac
-  ensure_running; sync_code; start_laptop_side "$MODEL"
+  credit_guard; ensure_running; sync_code; start_laptop_side "$MODEL"
   case "$2" in 5|6) archive_catalog_v1;; esac
   say "Starting night $2: $MODEL — $POLICIES"
   if [ "$2" = 6 ]; then
@@ -254,7 +284,11 @@ PY"
 hostrun)
   # hostrun <timeout-seconds> <local script>: run a bash script on the machine as ubuntu (starts it if stopped)
   [ -f "${3:-}" ] || { echo "usage: ~/ic-bench.sh hostrun <seconds> <script>"; exit 1; }
-  ensure_running; onhost "$2" "$3"
+  credit_guard; ensure_running; onhost "$2" "$3"
+  ;;
+credits)
+  # AWS credits: used so far, this month's usage, and what is left (one Cost Explorer call, $0.01)
+  credit_guard
   ;;
 status)
   ID=$(instance_id); echo "AWS machine: ${ID:-none} ($( [ -n "$ID" ] && state "$ID" || echo -))"
