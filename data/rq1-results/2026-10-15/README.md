@@ -17,3 +17,20 @@ Copied from the AWS bench host with `~/ic-bench.sh fetch` (checksum verified) an
 | qwen3:14b | 18% | 55% | 26% | 52% | – | – |
 
 These are the numbers to report. Read with `zcat full_rq1.jsonl.gz | python3 -m ic.bench.analyze /dev/stdin`.
+
+## Caveat found 15 Oct: the detection base rate
+
+32 of the 73 problems are detection ("is there a fault?"), and 29 of those 32 have one. **Answering "Yes" every time scores 29/32 on detection and 29/73 = 40% overall** with zero checks, the same as the random-checks baseline. Most of the headline gaps come from detection; for example, the 14B LLM-chooser ran no checks in 45 of 73 runs, and 17 of its 22 correct zero-check runs were detection "Yes" answers. Report accuracy per task and include the always-"Yes" baseline.
+
+Localization + analysis only (41 problems; 95% Wilson CI):
+
+| Setup | 8B | 14B |
+|---|---|---|
+| Plain LLM | 6/41 15% [7,28] | 9/41 22% [12,37] |
+| LLM picks checks | 10/41 24% [14,39] | 13/41 32% [20,47] |
+| Rule v1 | 9/41 22% [12,37] | 9/41 22% [12,37] |
+| Rule v2 | 9/41 22% [12,37] | 12/41 29% [18,44] |
+| Random | 10/41 24% [14,39] | – |
+| Every check | 7/41 17% [9,31] | – |
+
+On these, no setup is separable from random. Also: the 14B LLM-chooser's replies broke the output format 1.15 times per run (8B: 0.07), and 21 of its 73 runs ended by naming a check that doesn't exist.
