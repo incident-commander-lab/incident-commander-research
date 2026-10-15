@@ -74,31 +74,38 @@ def handle_llm(alerts: list[dict]):
         steps.append({"probe": k, "outcome": label, "free": True, "raw": raw[:400]})
         transcript.append(f'<observation source="{k}">{raw[:600]}</observation> -> {label}')
     alert_text = "Alerts firing:\n" + "\n".join(f"- {a['name']}: {a['summary']}" for a in alerts)
-    decision, errors, paid = None, [], 0
-    for _ in range(MAX_CHECKS + 1):
+    decision, errors, paid, must_decide = None, [], 0, False
+    for _ in range(MAX_CHECKS + 4):
         user = alert_text + "\n\nWhat you have seen so far:\n" + "\n".join(transcript)
-        if paid >= MAX_CHECKS:
-            user += "\n\nYou have used every check. Decide now (next='decide')."
+        if paid >= MAX_CHECKS or must_decide:
+            user += "\n\nNo more checks. Decide now (next='decide')."
         try:
             step = llm.json_call(_system(pr), user, _Step, max_tokens=4000, temperature=0.3, schema_hint=SCHEMA_HINT)
         except Exception as e:          # an unusable reply ends the investigation: escalate
             errors.append(str(e).splitlines()[-1][:200] if str(e) else type(e).__name__)
             break
-        if step.next == "check" and paid < MAX_CHECKS:
-            if step.check not in pr or any(x["probe"] == step.check and not x["free"] for x in steps):
-                transcript.append(f"(invalid or repeated check '{step.check}': choose another key from the list)")
+        if step.next == "check" and not (paid >= MAX_CHECKS or must_decide):
+            done = {x["probe"]: x["outcome"] for x in steps}
+            if step.check in done:      # already seen: hand back the result instead of re-running it
+                transcript.append(f"(you already ran {step.check}: {done[step.check]}. "
+                                  "Run a check you have not run yet, or decide.)")
+                errors.append(f"repeated check {step.check}")
+            elif step.check not in pr:
+                transcript.append(f"('{step.check}' is not a check. Use a key from the list, or decide.)")
                 errors.append(f"invalid check {step.check}")
-                if len(errors) >= 3:
-                    break
+            else:
+                raw, label = probes.run(pr[step.check])
+                paid += 1
+                steps.append({"probe": step.check, "outcome": label, "free": False, "raw": raw[:400],
+                              "thought": step.thought[:300]})
+                transcript.append(f'<observation source="{step.check}">{raw[:600]}</observation> -> '
+                                  f'{label if label else "check failed"}')
                 continue
-            raw, label = probes.run(pr[step.check])
-            paid += 1
-            steps.append({"probe": step.check, "outcome": label, "free": False, "raw": raw[:400],
-                          "thought": step.thought[:300]})
-            transcript.append(f'<observation source="{step.check}">{raw[:600]}</observation> -> '
-                              f'{label if label else "check failed"}')
+            must_decide = len(errors) >= 3   # stuck asking for checks it cannot have: make it conclude
             continue
-        decision = step
+        if step.next != "decide" and (paid >= MAX_CHECKS or must_decide):
+            errors.append("asked for a check after being told to decide")
+        decision = step if step.next == "decide" or step.remedy != "none" or step.service else None
         break
     remedy = decision.remedy if decision and decision.remedy in actions.CATALOG else "none"
     p = float(decision.confidence) if decision else 0.0
