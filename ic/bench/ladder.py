@@ -53,7 +53,10 @@ TOOL_ERROR = "Error from server (NotFound): no reading of this check in the RQ1 
 # confidence becomes an equal prior. Strict results are never modified (separate files).
 LENIENT = os.environ.get("IC_LADDER_LENIENT") == "1"
 SUFFIX = "_lenient" if LENIENT else ""
-MODELS = ["qwen3:0.6b", "qwen3:1.7b", "qwen3:4b", "qwen3:8b", "qwen3:14b"]
+# qwen3:4b is NOT used: since Ollama's 2507 update that tag is Qwen3-4B-Thinking-2507 (thinking
+# cannot be turned off, newer generation). 4b-q4_K_M is the original hybrid Qwen3-4B, the same
+# family and quantisation as 1.7b/8b/14b (registry weights digests checked 16 Oct 2026).
+MODELS = ["qwen3:0.6b", "qwen3:1.7b", "qwen3:4b-q4_K_M", "qwen3:8b", "qwen3:14b"]
 
 
 def _log_path(r: dict) -> str:
