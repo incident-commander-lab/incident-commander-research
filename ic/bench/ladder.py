@@ -47,6 +47,12 @@ RESULTS = os.environ.get("IC_RQ1_RESULTS") or next(
                os.path.join(ROOT, "..", "results", "aiopslab_full_rq1", "results"))  # worktree checkout
      if os.path.exists(p)), os.path.join(ROOT, "results", "aiopslab_full_rq1", "results"))
 TOOL_ERROR = "Error from server (NotFound): no reading of this check in the RQ1 runs"
+# Lenient-format variant (IC_LADDER_LENIENT=1): a separate, labelled analysis for models that fail
+# the strict hypothesis contract (qwen3:1.7b omits `confidence`). Generations that passed the strict
+# check are reused unchanged; only failed ones are asked again with the same prompt, and a missing
+# confidence becomes an equal prior. Strict results are never modified (separate files).
+LENIENT = os.environ.get("IC_LADDER_LENIENT") == "1"
+SUFFIX = "_lenient" if LENIENT else ""
 MODELS = ["qwen3:0.6b", "qwen3:1.7b", "qwen3:4b", "qwen3:8b", "qwen3:14b"]
 
 
@@ -106,11 +112,33 @@ def _load(name: str):
         return json.load(f)
 
 
+def _generate_lenient(problem, services, probes, observations, findings=None):
+    """hypotheses.generate with `confidence` optional (missing -> equal prior); same prompt."""
+    from pydantic import BaseModel, Field
+    from typing import Optional as Opt
+    from .. import llm
+
+    class _H(hyp_gen._Hypothesis):
+        confidence: Opt[float] = Field(None, ge=0.0, le=1.0)
+
+    class _R(BaseModel):
+        hypotheses: list[_H] = Field(min_length=2, max_length=6)
+
+    resp = llm.json_call(hyp_gen._system_prompt(), hyp_gen._user_prompt(problem, services, observations, findings),
+                         _R, max_tokens=12000, temperature=0.3, schema_hint=hyp_gen.SCHEMA_HINT)
+    filled = sum(h.confidence is None for h in resp.hypotheses)
+    for h in resp.hypotheses:
+        if h.confidence is None:
+            h.confidence = round(1 / len(resp.hypotheses), 3)
+    hyps, meta = hyp_gen._clean(resp, services, probes)
+    return hyps + [hyp_gen.no_fault_hypothesis(probes)], {**meta, "confidence_filled": filled}
+
+
 class _Cache:
     """(model, problem, findings) -> generated hypotheses, persisted as JSON lines."""
 
-    def __init__(self, path: str):
-        self.path, self.d = path, {}
+    def __init__(self, path: str, strict: "Optional[_Cache]" = None):
+        self.path, self.d, self.strict = path, {}, strict
         if os.path.exists(path):
             for line in open(path):
                 e = json.loads(line)
@@ -120,10 +148,13 @@ class _Cache:
         def gen(problem, services, probes, observations, findings=None):
             key = (model, pid, json.dumps(findings or []) + ("|retry" if "valid service names (use exactly these)"
                                                              in observations else ""))
+            if key not in self.d and self.strict is not None and "error" not in self.strict.d.get(key, {"error": 1}):
+                self.d[key] = self.strict.d[key]      # passed the strict check: reuse it unchanged
             if key not in self.d:
                 t0 = time.monotonic()
                 try:
-                    hyps, meta = hyp_gen.generate(problem, services, probes, observations, findings)
+                    fn = _generate_lenient if self.strict is not None else hyp_gen.generate
+                    hyps, meta = fn(problem, services, probes, observations, findings)
                     e = {"hyps": [dataclasses.asdict(h) for h in hyps], "meta": meta}
                 except Exception as ex:  # recorded, and re-raised so the agent gives up honestly
                     e = {"error": str(ex).splitlines()[-1][:300] if str(ex) else type(ex).__name__}
@@ -184,11 +215,12 @@ def run(models: list[str]) -> None:
     inputs, bank = _load("inputs"), _load("bank")
     rows = [json.loads(l) for l in open(os.path.join(RESULTS, "full_rq1.jsonl"))]
     gt = ground_truth(rows)
-    out_path = os.path.join(DATA, "ladder_runs.jsonl")
+    out_path = os.path.join(DATA, f"ladder_runs{SUFFIX}.jsonl")
     done = set()
     if os.path.exists(out_path):
         done = {(e["model"], e["problem"], e["rule_version"]) for e in map(json.loads, open(out_path))}
-    cache = _Cache(os.path.join(DATA, "generations.jsonl"))
+    strict = _Cache(os.path.join(DATA, "generations.jsonl"))
+    cache = _Cache(os.path.join(DATA, "generations_lenient.jsonl"), strict) if LENIENT else strict
     for model in models:
         os.environ.update(IC_USE_LLM="1", IC_STRICT_PROVIDER="1", IC_PROVIDER="openrouter_models",
                           IC_OPENROUTER_MODELS=f"ollama:{model}", IC_LLM_TIMEOUT="600",
@@ -211,7 +243,8 @@ def run(models: list[str]) -> None:
 
 def table() -> None:
     import math
-    runs = [json.loads(l) for l in open(os.path.join(DATA, "ladder_runs.jsonl"))]
+    runs = [json.loads(l) for l in open(os.path.join(DATA, f"ladder_runs{SUFFIX}.jsonl"))]
+    print("LENIENT-FORMAT VARIANT (missing confidence -> equal prior)" if LENIENT else "STRICT contract (as deployed)")
 
     def wilson(k, n, z=1.96):
         if not n:
