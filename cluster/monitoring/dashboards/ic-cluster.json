@@ -1,0 +1,525 @@
+{
+ "uid": "ic-cluster",
+ "title": "Cluster overview: CPU, RAM, GPU",
+ "timezone": "browser",
+ "refresh": "10s",
+ "schemaVersion": 39,
+ "time": {
+  "from": "now-30m",
+  "to": "now"
+ },
+ "tags": [
+  "incident-commander"
+ ],
+ "panels": [
+  {
+   "type": "row",
+   "title": "Nodes",
+   "gridPos": {
+    "w": 24,
+    "h": 1,
+    "x": 0,
+    "y": 0
+   },
+   "collapsed": false,
+   "panels": [],
+   "id": 1
+  },
+  {
+   "type": "timeseries",
+   "title": "Node CPU busy",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 12,
+    "h": 8,
+    "x": 0,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "max": 100,
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "100 * (1 - avg by (node) (rate(node_cpu_seconds_total{mode=\"idle\"}[1m])))",
+     "legendFormat": "{{node}}",
+     "refId": "A"
+    }
+   ],
+   "id": 2
+  },
+  {
+   "type": "timeseries",
+   "title": "Node memory used",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 12,
+    "h": 8,
+    "x": 12,
+    "y": 1
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "max": 100,
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+     "legendFormat": "{{node}}",
+     "refId": "A"
+    }
+   ],
+   "id": 3
+  },
+  {
+   "type": "row",
+   "title": "Pods (share of their own limit: 100% = saturated)",
+   "gridPos": {
+    "w": 24,
+    "h": 1,
+    "x": 0,
+    "y": 9
+   },
+   "collapsed": false,
+   "panels": [],
+   "id": 4
+  },
+  {
+   "type": "timeseries",
+   "title": "Pod CPU vs limit",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 12,
+    "h": 8,
+    "x": 0,
+    "y": 10
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "100 * sum by (pod) (rate(container_cpu_usage_seconds_total{namespace=~\"shop|pulse|ai\",container!=\"\"}[1m])) / sum by (pod) (kube_pod_container_resource_limits{namespace=~\"shop|pulse|ai\",resource=\"cpu\"})",
+     "legendFormat": "{{pod}}",
+     "refId": "A"
+    }
+   ],
+   "id": 5
+  },
+  {
+   "type": "timeseries",
+   "title": "Pod memory vs limit",
+   "description": "Above 100% the kernel kills the container (OOMKilled)",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 12,
+    "h": 8,
+    "x": 12,
+    "y": 10
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "100 * sum by (pod) (container_memory_working_set_bytes{namespace=~\"shop|pulse|ai\",container!=\"\"}) / sum by (pod) (kube_pod_container_resource_limits{namespace=~\"shop|pulse|ai\",resource=\"memory\"})",
+     "legendFormat": "{{pod}}",
+     "refId": "A"
+    }
+   ],
+   "id": 6
+  },
+  {
+   "type": "timeseries",
+   "title": "Restarts (last 10 min)",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 8,
+    "h": 8,
+    "x": 0,
+    "y": 18
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "sum by (pod) (increase(kube_pod_container_status_restarts_total{namespace=~\"shop|pulse|ai\"}[10m]))",
+     "legendFormat": "{{pod}}",
+     "refId": "A"
+    }
+   ],
+   "id": 7
+  },
+  {
+   "type": "timeseries",
+   "title": "OOM kills",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 8,
+    "h": 8,
+    "x": 8,
+    "y": 18
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "sum by (pod) (kube_pod_container_status_last_terminated_reason{namespace=~\"shop|pulse|ai\",reason=\"OOMKilled\"})",
+     "legendFormat": "{{pod}}",
+     "refId": "A"
+    }
+   ],
+   "id": 8
+  },
+  {
+   "type": "timeseries",
+   "title": "Replicas available",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 8,
+    "h": 8,
+    "x": 16,
+    "y": 18
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "short",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "kube_deployment_status_replicas_available{namespace=~\"shop|pulse|ai\"}",
+     "legendFormat": "{{deployment}}",
+     "refId": "A"
+    }
+   ],
+   "id": 9
+  },
+  {
+   "type": "row",
+   "title": "GPU (NVIDIA DCGM, AWS GPU node only)",
+   "gridPos": {
+    "w": 24,
+    "h": 1,
+    "x": 0,
+    "y": 26
+   },
+   "collapsed": false,
+   "panels": [],
+   "id": 10
+  },
+  {
+   "type": "timeseries",
+   "title": "GPU utilisation",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 6,
+    "h": 8,
+    "x": 0,
+    "y": 27
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "max": 100,
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "avg by (gpu, Hostname) (DCGM_FI_DEV_GPU_UTIL)",
+     "legendFormat": "GPU {{gpu}}",
+     "refId": "A"
+    }
+   ],
+   "id": 11
+  },
+  {
+   "type": "timeseries",
+   "title": "GPU memory used",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 6,
+    "h": 8,
+    "x": 6,
+    "y": 27
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "percent",
+     "max": 100,
+     "min": 0,
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "100 * avg by (gpu) (DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE))",
+     "legendFormat": "GPU {{gpu}}",
+     "refId": "A"
+    }
+   ],
+   "id": 12
+  },
+  {
+   "type": "timeseries",
+   "title": "GPU power",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 6,
+    "h": 8,
+    "x": 12,
+    "y": 27
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "watt",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "avg by (gpu) (DCGM_FI_DEV_POWER_USAGE)",
+     "legendFormat": "GPU {{gpu}}",
+     "refId": "A"
+    }
+   ],
+   "id": 13
+  },
+  {
+   "type": "timeseries",
+   "title": "GPU temperature",
+   "description": "",
+   "datasource": {
+    "type": "prometheus",
+    "uid": "prom"
+   },
+   "gridPos": {
+    "w": 6,
+    "h": 8,
+    "x": 18,
+    "y": 27
+   },
+   "fieldConfig": {
+    "defaults": {
+     "unit": "celsius",
+     "custom": {
+      "lineWidth": 2,
+      "fillOpacity": 10
+     }
+    },
+    "overrides": []
+   },
+   "options": {
+    "legend": {
+     "displayMode": "list",
+     "placement": "bottom"
+    },
+    "tooltip": {
+     "mode": "multi"
+    }
+   },
+   "targets": [
+    {
+     "expr": "avg by (gpu) (DCGM_FI_DEV_GPU_TEMP)",
+     "legendFormat": "GPU {{gpu}}",
+     "refId": "A"
+    }
+   ],
+   "id": 14
+  }
+ ]
+}

@@ -1,0 +1,19 @@
+# prometheus-community/prometheus 29.37.0. Monitoring lives on the ops node so saturating the apps
+# node never starves it. Scrapes: kubelet/cAdvisor (pod CPU/RAM), node-exporter (node CPU/RAM),
+# kube-state-metrics (limits, restarts, OOMKilled), pods annotated prometheus.io/scrape (apps),
+# and DCGM on AWS (GPU).
+server:
+  nodeSelector: { role: ops }
+  global: { scrape_interval: 10s, evaluation_interval: 10s }
+  retention: 7d
+  persistentVolume: { enabled: false }     # local; on AWS the session report and Grafana snapshot are kept
+  resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 1Gi } }
+alertmanager:
+  enabled: true
+  nodeSelector: { role: ops }
+  persistence: { enabled: false }
+prometheus-pushgateway: { enabled: false }
+kube-state-metrics:
+  nodeSelector: { role: ops }
+prometheus-node-exporter:
+  hostRootFsMount: { enabled: false }      # k3d nodes are containers; real hosts on AWS

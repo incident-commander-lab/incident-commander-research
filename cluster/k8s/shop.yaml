@@ -1,0 +1,82 @@
+# The shop: OWASP Juice Shop (deliberately vulnerable; never exposed publicly) + our AI assistant.
+# Both run on the apps node. One CPU per Juice Shop pod, so a traffic surge saturates a replica
+# and scaling out really helps (each pod has its own embedded SQLite: logged-in users are kept on
+# one pod by a sticky cookie at the ingress).
+apiVersion: v1
+kind: Namespace
+metadata: { name: shop }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: juice-shop, namespace: shop, labels: { app: juice-shop } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: juice-shop } }
+  template:
+    metadata:
+      labels: { app: juice-shop }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "3000", prometheus.io/path: /metrics }
+    spec:
+      nodeSelector: { role: apps }
+      containers:
+        - name: juice-shop
+          image: bkimminich/juice-shop:v20.3.0
+          ports: [{ containerPort: 3000 }]
+          resources: { requests: { cpu: 250m, memory: 256Mi }, limits: { cpu: "1", memory: 768Mi } }
+          readinessProbe: { httpGet: { path: /rest/admin/application-version, port: 3000 }, periodSeconds: 10, failureThreshold: 6 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: juice-shop
+  namespace: shop
+  annotations:
+    traefik.ingress.kubernetes.io/service.sticky.cookie: "true"
+    traefik.ingress.kubernetes.io/service.sticky.cookie.name: shop_affinity
+spec:
+  selector: { app: juice-shop }
+  ports: [{ port: 3000, targetPort: 3000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: assistant, namespace: shop, labels: { app: assistant } }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: assistant } }
+  template:
+    metadata:
+      labels: { app: assistant }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "8000", prometheus.io/path: /metrics }
+    spec:
+      nodeSelector: { role: apps }
+      containers:
+        - name: assistant
+          image: ic/assistant:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports: [{ containerPort: 8000 }]
+          env:   # the release: a change here is a rollout, `kubectl rollout undo` reverts it
+            - { name: ASSISTANT_VERSION, value: "1.0.0" }
+            - { name: CHAT_MODEL, value: "qwen3:1.7b" }          # AWS: qwen3:4b on the GPU node
+            - { name: OLLAMA_URL, value: "http://host.k3d.internal:11434" }   # AWS: ollama-chat.ai.svc
+            - { name: NUM_CTX, value: "2048" }
+            - { name: MAX_CONCURRENCY, value: "4" }
+            - { name: RETAIN_ANSWERS, value: "false" }
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 256Mi } }
+          readinessProbe: { httpGet: { path: /assistant/healthz, port: 8000 }, periodSeconds: 10 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: assistant, namespace: shop }
+spec:
+  selector: { app: assistant }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata: { name: shop, namespace: shop }
+spec:
+  rules:
+    - http:
+        paths:
+          - { path: /assistant, pathType: Prefix, backend: { service: { name: assistant, port: { number: 8000 } } } }
+          - { path: /, pathType: Prefix, backend: { service: { name: juice-shop, port: { number: 3000 } } } }

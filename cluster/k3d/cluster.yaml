@@ -6,6 +6,8 @@ metadata: { name: ic }
 servers: 1
 agents: 2
 image: rancher/k3s:v1.31.5-k3s1
+ports:
+  - { port: "3400:80", nodeFilters: ["loadbalancer"] }   # Traefik ingress: Juice Shop + assistant
 options:
   k3s:
     # Traefik stays enabled: the ingress gives logged-in Juice Shop users cookie stickiness (per-pod SQLite)

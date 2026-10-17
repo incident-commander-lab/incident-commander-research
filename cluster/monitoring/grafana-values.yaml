@@ -1,0 +1,17 @@
+# grafana/grafana 10.5.15. Read-only for viewers; dashboards are provisioned from ConfigMaps
+# labelled grafana_dashboard=1 (cluster/monitoring/dashboards/*.json). Never exposed publicly:
+# reached through a port-forward (locally) or Session Manager (AWS).
+nodeSelector: { role: ops }
+adminPassword: change-me-local-only
+grafana.ini:
+  auth.anonymous: { enabled: true, org_role: Viewer }
+  analytics: { reporting_enabled: false, check_for_updates: false }
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      - { name: Prometheus, uid: prom, type: prometheus, access: proxy, isDefault: true,
+          url: "http://prometheus-server.monitoring.svc", jsonData: { timeInterval: 10s } }
+sidecar:
+  dashboards: { enabled: true, label: grafana_dashboard, labelValue: "1", folder: /tmp/dashboards, searchNamespace: monitoring }
+resources: { requests: { cpu: 50m, memory: 128Mi }, limits: { memory: 512Mi } }

@@ -1,0 +1,25 @@
+# A load run: Locust headless on the ops node, hitting the ingress inside the cluster.
+#   kubectl -n load create configmap locustfile --from-file=cluster/load/locustfile.py
+#   kubectl apply -f cluster/load/job.yaml      (USERS / SPAWN / DURATION below)
+apiVersion: v1
+kind: Namespace
+metadata: { name: load }
+---
+apiVersion: batch/v1
+kind: Job
+metadata: { name: locust-run, namespace: load }
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector: { role: ops }
+      containers:
+        - name: locust
+          image: locustio/locust:2.33.0
+          args: ["-f", "/mnt/locustfile.py", "--headless", "-u", "60", "-r", "3", "-t", "5m",
+                 "--host", "http://traefik.kube-system.svc.cluster.local", "--only-summary"]
+          volumeMounts: [{ name: lf, mountPath: /mnt }]
+          resources: { requests: { cpu: 200m, memory: 128Mi }, limits: { memory: 512Mi } }
+      volumes: [{ name: lf, configMap: { name: locustfile } }]
