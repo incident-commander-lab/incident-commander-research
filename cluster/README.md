@@ -20,6 +20,9 @@ cluster/cluster.sh stop      # pause (start resumes; down deletes)
 | Shopper journeys (Locust 2.33.0); trace shaping comes on day 2 | `load/` |
 
 **Day 1 result (18 Oct, local):** 60 shoppers → ~22 req/s; Juice Shop at ~70% of its 1-CPU limit at the
-peak (so ~100 req/s saturates one replica, as planned); the assistant's model (qwen3:1.7b on the Mac)
+peak; the 5-minute Locust summary: 4,890 requests, 2 failures (0.04%, assistant), but Juice Shop's p95
+was already 6–10 s at ~16 req/s (median 0.6 s): on the Mac it shares CPU with the model answering the
+assistant, so the real per-replica saturation point (planned ~100 req/s) is measured on AWS before the
+peak load is set; the assistant's model (qwen3:1.7b on the Mac)
 saturates at 4 in flight: answer p95 rises from ~4 s to ~14 s with a full queue. Locally all three
 "nodes" share one Docker VM, so node CPU lines overlap; on AWS they are separate machines.
