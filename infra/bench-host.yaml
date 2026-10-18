@@ -122,7 +122,7 @@ Resources:
           sysctl -p
           sudo -u ubuntu bash -lc 'pipx install poetry && pipx ensurepath'
           sudo -u ubuntu git clone --depth 1 --recurse-submodules https://github.com/microsoft/AIOpsLab.git /home/ubuntu/AIOpsLab
-          sudo -u ubuntu git clone --depth 1 https://github.com/S2800-0/incident-commander.git /home/ubuntu/incident-commander
+          sudo -u ubuntu git clone --depth 1 https://github.com/incident-commander-lab/incident-commander.git /home/ubuntu/incident-commander
           touch /home/ubuntu/BOOTSTRAP_DONE
 
   IdleStopAlarm:

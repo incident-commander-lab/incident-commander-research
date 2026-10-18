@@ -1,6 +1,6 @@
 # 2. Phase 1: the demo system
 
-This is the public project ([github.com/S2800-0/incident-commander](https://github.com/S2800-0/incident-commander), DOI 10.5281/zenodo.23276216). It is a working agent on a small mock shop, built to show **the loop**, not to measure it. Chapters 4–6 do the measuring.
+This is the public project ([github.com/incident-commander-lab/incident-commander](https://github.com/incident-commander-lab/incident-commander), DOI 10.5281/zenodo.23276216). It is a working agent on a small mock shop, built to show **the loop**, not to measure it. Chapters 4–6 do the measuring.
 
 ![The public repository](img/github-repo.png)
 

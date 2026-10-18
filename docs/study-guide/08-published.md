@@ -32,8 +32,8 @@ Release v1.0.0 of the public repo: **DOI [10.5281/zenodo.23276216](https://doi.o
 
 ## GitHub
 
-- Public: [S2800-0/incident-commander](https://github.com/S2800-0/incident-commander). Phase 1 demo, README, CITATION.cff, MIT license. `main` stays the frozen demo; changes go in through PRs only. PR #3 ("graduation research" → "ongoing research") is waiting to be merged.
-- Private: **S2800-0/incident-commander-research** (this repo): the benchmark, simulator, results tools and this guide.
+- Public: [incident-commander-lab/incident-commander](https://github.com/incident-commander-lab/incident-commander). Phase 1 demo, README, CITATION.cff, MIT license. `main` stays the frozen demo; changes go in through PRs only. PR #3 ("graduation research" → "ongoing research") is waiting to be merged.
+- Private: **incident-commander-lab/incident-commander-research** (this repo): the benchmark, simulator, results tools and this guide.
 
 ## Portfolio
 

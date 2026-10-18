@@ -4,7 +4,7 @@
 
 **An AI SRE agent that decides when *not* to act: which checks to run, when to stop, and when to hand an incident to a human.**
 
-Private research repo of Shahesta Salama and Nourseen Tarek (Alryada University). The public demo lives at [S2800-0/incident-commander](https://github.com/S2800-0/incident-commander).
+Private research repo of Shahesta Salama and Nourseen Tarek (Alryada University). The public demo lives at [incident-commander-lab/incident-commander](https://github.com/incident-commander-lab/incident-commander).
 
 [Status](#status-15-oct-2026) · [Results](#rq1-results-final) · [Start here](#start-here-reading-order) · [Layout](#repository-layout) · [How to run](#how-to-run-things) · [Live test bed](#rq3-the-live-test-bed-pulse) · [Next](#what-comes-next) · [Rules](#rules-we-keep)
 
