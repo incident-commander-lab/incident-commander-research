@@ -3,7 +3,7 @@
 #
 #   cluster/cluster.sh up       create the cluster, monitoring, dashboards, shop + assistant
 #   cluster/cluster.sh ui       Grafana http://localhost:3401 (port-forward) · shop http://localhost:3400
-#   cluster/cluster.sh load [users] [minutes]   a Locust run inside the cluster (default 60 users, 5 min)
+#   cluster/cluster.sh load trace [peak] [hours] | load const [users] [minutes]   Locust inside the cluster
 #   cluster/cluster.sh status   nodes, pods, last load summary
 #   cluster/cluster.sh stop | start | down      pause / resume / delete the cluster
 #
@@ -11,6 +11,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 C=ic
+# Always talk to OUR cluster, never whatever kubectl currently points at (Docker Desktop resets the
+# current context to its own Kubernetes, which runs other projects).
+kubectl() { command kubectl --context "k3d-$C" "$@"; }
+helm() { command helm --kube-context "k3d-$C" "$@"; }
 
 dashboards() {
   python3 cluster/monitoring/make_dashboards.py >/dev/null
@@ -37,6 +41,9 @@ up)
   curl -sf -m 5 localhost:11434/api/tags >/dev/null || { nohup ollama serve >/dev/null 2>&1 & sleep 4; }
   ollama show qwen3:1.7b >/dev/null 2>&1 || ollama pull qwen3:1.7b
   kubectl apply -f cluster/k8s/shop.yaml >/dev/null
+  (cd cluster/chaos && docker build -q -t ic/chaos:1.0.0 . >/dev/null) && k3d image import ic/chaos:1.0.0 -c "$C" >/dev/null
+  kubectl create namespace load --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl apply -f cluster/k8s/chaos.yaml >/dev/null
   kubectl -n shop rollout status deploy/juice-shop --timeout=10m >/dev/null
   kubectl -n shop rollout status deploy/assistant --timeout=5m >/dev/null
   echo "up. Shop: http://localhost:3400   Grafana: cluster/cluster.sh ui"
@@ -48,16 +55,25 @@ ui)
   open "http://localhost:3401/d/ic-cluster" 2>/dev/null || true
   ;;
 load)
-  U=${2:-60}; M=${3:-5}
+  # load trace [peak-users] [trace-hours]   real daily cycle (German Wikipedia, 1 day -> 1 hour)
+  # load const [users] [minutes]            constant load (also what the CPU-surge fault uses)
+  MODE=${2:-trace}
   kubectl create namespace load --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   kubectl -n load create configmap locustfile --from-file=cluster/load/locustfile.py --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-  kubectl -n load delete job locust-run --ignore-not-found >/dev/null
-  sed -e "s/\"-u\", \"60\"/\"-u\", \"$U\"/" -e "s/\"-t\", \"5m\"/\"-t\", \"${M}m\"/" cluster/load/job.yaml | kubectl apply -f - >/dev/null
-  echo "load: $U users for $M min (watch Grafana; summary: cluster/cluster.sh status)"
+  kubectl -n load create configmap traces --from-file=cluster/load/traces/ --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  if [ "$MODE" = trace ]; then
+    U=${3:-60}; H=${4:-24}; M=$(python3 -c "print(int($H * 3600 / 24 / 60) + 2)"); T=/traces/wikipedia-de-hourly-2026-09-28.json; N=locust-trace
+  else
+    U=${3:-60}; M=${4:-5}; H=0; T=""; N=locust-const
+  fi
+  kubectl -n load delete job "$N" --ignore-not-found >/dev/null
+  sed -e "s/NAME/$N/" -e "s/\"USERS\"/\"$U\"/g" -e "s/MINUTESm/${M}m/" -e "s|\"TRACE\"|\"$T\"|" \
+      -e "s/\"TRACEHOURS\"/\"$H\"/" cluster/load/job.yaml | kubectl apply -f - >/dev/null
+  echo "load ($MODE): $U users$( [ "$MODE" = trace ] && echo " at the busiest hour, $H trace hours") for about $M min"
   ;;
 status)
   kubectl get nodes -L role; kubectl get pods -A -o wide --no-headers | awk '$1 ~ /shop|monitoring|load|ai|pulse/ {print $1, $2, $4, $8}'
-  kubectl -n load logs job/locust-run --tail=25 2>/dev/null || true
+  for j in locust-trace locust-const; do kubectl -n load logs job/$j --tail=12 2>/dev/null || true; done
   ;;
 stop)  k3d cluster stop "$C" ;;
 start) k3d cluster start "$C" ;;

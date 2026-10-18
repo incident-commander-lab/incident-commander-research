@@ -1,0 +1,65 @@
+# The fault injector and its sealed answer key. Least privilege: it may change Deployments only in
+# `shop` and Jobs only in `load`. The answer key lives on a volume in `chaos`, a namespace the agent
+# has no access to.
+apiVersion: v1
+kind: Namespace
+metadata: { name: chaos }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: sealed, namespace: chaos }
+spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 64Mi } } }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: chaos, namespace: chaos }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: chaos-shop, namespace: shop }
+rules:
+  - { apiGroups: [apps], resources: [deployments], verbs: [get, list, patch] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: chaos-shop, namespace: shop }
+subjects: [{ kind: ServiceAccount, name: chaos, namespace: chaos }]
+roleRef: { kind: Role, name: chaos-shop, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: chaos-load, namespace: load }
+rules:
+  - { apiGroups: [batch], resources: [jobs], verbs: [get, list, create, delete] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: chaos-load, namespace: load }
+subjects: [{ kind: ServiceAccount, name: chaos, namespace: chaos }]
+roleRef: { kind: Role, name: chaos-load, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: chaos, namespace: chaos }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: chaos } }
+  template:
+    metadata: { labels: { app: chaos } }
+    spec:
+      serviceAccountName: chaos
+      nodeSelector: { role: ops }
+      containers:
+        - name: chaos
+          image: ic/chaos:1.0.0
+          imagePullPolicy: IfNotPresent
+          args: ["serve"]                       # sessions: "slots" (fixed seeded schedule)
+          env:
+            - { name: FAULT_TIMEOUT_MIN, value: "15" }
+            - { name: SURGE_USERS, value: "150" }
+            - { name: CHAOS_GPU_NUM_CTX, value: "16384" }   # local cap; larger on the AWS GPU
+            - { name: CHAOS_SEED, value: "0" }
+          volumeMounts: [{ name: sealed, mountPath: /sealed }]
+          resources: { requests: { cpu: 20m, memory: 64Mi }, limits: { memory: 256Mi } }
+      volumes: [{ name: sealed, persistentVolumeClaim: { claimName: sealed } }]
