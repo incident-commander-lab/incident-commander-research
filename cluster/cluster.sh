@@ -5,6 +5,7 @@
 #   cluster/cluster.sh ui       Grafana http://localhost:3401 (port-forward) · shop http://localhost:3400
 #   cluster/cluster.sh load trace [peak] [hours] | load const [users] [minutes]   Locust inside the cluster
 #   cluster/cluster.sh status   nodes, pods, last load summary
+#   cluster/cluster.sh reset    fresh pods + cleared events before a session
 #   cluster/cluster.sh stop | start | down      pause / resume / delete the cluster
 #
 # Needs: Docker Desktop, k3d, kubectl, helm, Ollama on the Mac (the assistant's model locally).
@@ -44,6 +45,10 @@ up)
   (cd cluster/chaos && docker build -q -t ic/chaos:1.0.0 . >/dev/null) && k3d image import ic/chaos:1.0.0 -c "$C" >/dev/null
   kubectl create namespace load --dry-run=client -o yaml | kubectl apply -f - >/dev/null
   kubectl apply -f cluster/k8s/chaos.yaml >/dev/null
+  docker build -q -f cluster/agent/Dockerfile -t ic/cluster-agent:1.0.0 . >/dev/null && k3d image import ic/cluster-agent:1.0.0 -c "$C" >/dev/null
+  kubectl create namespace agent --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n agent create configmap opa-policy --from-file=policy.rego=cluster/agent/policy.rego --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl apply -f cluster/k8s/agent.yaml >/dev/null
   kubectl -n shop rollout status deploy/juice-shop --timeout=10m >/dev/null
   kubectl -n shop rollout status deploy/assistant --timeout=5m >/dev/null
   echo "up. Shop: http://localhost:3400   Grafana: cluster/cluster.sh ui"
@@ -74,6 +79,15 @@ load)
 status)
   kubectl get nodes -L role; kubectl get pods -A -o wide --no-headers | awk '$1 ~ /shop|monitoring|load|ai|pulse/ {print $1, $2, $4, $8}'
   for j in locust-trace locust-const; do kubectl -n load logs job/$j --tail=12 2>/dev/null || true; done
+  ;;
+reset)
+  # before a session: fresh pods (restart counters 0) and no stale Warning events from earlier runs,
+  # so the agent's first evidence describes now, not the last stop/start of the laptop cluster
+  kubectl apply -f cluster/k8s/shop.yaml >/dev/null
+  kubectl -n shop rollout restart deploy/juice-shop deploy/assistant >/dev/null
+  kubectl -n shop rollout status deploy/juice-shop --timeout=5m >/dev/null && kubectl -n shop rollout status deploy/assistant --timeout=5m >/dev/null
+  kubectl -n shop delete events --all >/dev/null
+  echo "reset: fresh pods, events cleared"
   ;;
 stop)  k3d cluster stop "$C" ;;
 start) k3d cluster start "$C" ;;

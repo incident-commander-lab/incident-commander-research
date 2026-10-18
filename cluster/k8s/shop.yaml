@@ -23,7 +23,7 @@ spec:
           image: bkimminich/juice-shop:v20.3.0
           ports: [{ containerPort: 3000 }]
           resources: { requests: { cpu: 250m, memory: 256Mi }, limits: { cpu: "1", memory: 768Mi } }
-          readinessProbe: { httpGet: { path: /rest/admin/application-version, port: 3000 }, periodSeconds: 10, failureThreshold: 6 }
+          readinessProbe: { httpGet: { path: /rest/admin/application-version, port: 3000 }, initialDelaySeconds: 40, periodSeconds: 10, failureThreshold: 6 }   # starts in ~30 s: no false 'Unhealthy' events
 ---
 apiVersion: v1
 kind: Service
@@ -62,7 +62,7 @@ spec:
             - { name: MAX_CONCURRENCY, value: "4" }
             - { name: RETAIN_ANSWERS, value: "false" }
           resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { cpu: 500m, memory: 256Mi } }
-          readinessProbe: { httpGet: { path: /assistant/healthz, port: 8000 }, periodSeconds: 10 }
+          readinessProbe: { httpGet: { path: /assistant/healthz, port: 8000 }, initialDelaySeconds: 5, periodSeconds: 10 }
 ---
 apiVersion: v1
 kind: Service

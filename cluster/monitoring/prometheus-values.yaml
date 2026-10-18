@@ -8,12 +8,61 @@ server:
   retention: 7d
   persistentVolume: { enabled: false }     # local; on AWS the session report and Grafana snapshot are kept
   resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 1Gi } }
-alertmanager:
-  enabled: true
-  nodeSelector: { role: ops }
-  persistence: { enabled: false }
 prometheus-pushgateway: { enabled: false }
 kube-state-metrics:
   nodeSelector: { role: ops }
 prometheus-node-exporter:
   hostRootFsMount: { enabled: false }      # k3d nodes are containers; real hosts on AWS
+
+# SLO-style alerts: what users and operators would notice, never the fault itself.
+serverFiles:
+  alerting_rules.yml:
+    groups:
+      - name: shop
+        rules:
+          - alert: ShopSlow
+            expr: histogram_quantile(0.95, sum by (le, service) (rate(traefik_service_request_duration_seconds_bucket{service=~"shop-.*"}[2m]))) > 3
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "p95 latency of {{ $labels.service }} above 3 s" }
+          - alert: ShopErrors
+            expr: sum by (service) (rate(traefik_service_requests_total{service=~"shop-.*",code=~"5.."}[2m])) / sum by (service) (rate(traefik_service_requests_total{service=~"shop-.*"}[2m])) > 0.05
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "more than 5% errors from {{ $labels.service }}" }
+          - alert: PodRestarting
+            expr: increase(kube_pod_container_status_restarts_total{namespace="shop"}[5m]) > 0
+            labels: { severity: page }
+            annotations: { summary: "{{ $labels.container }} restarted in the last 5 minutes" }
+          - alert: CPUSaturated
+            expr: sum by (container) (rate(container_cpu_usage_seconds_total{namespace="shop",container!=""}[2m])) / sum by (container) (kube_pod_container_resource_limits{namespace="shop",resource="cpu"}) > 0.9
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "{{ $labels.container }} at its CPU limit" }
+          - alert: AssistantBacklog
+            expr: avg_over_time(sum(assistant_queue_depth)[3m:15s]) > 2
+            labels: { severity: page }
+            annotations: { summary: "questions are queueing for the model" }
+          - alert: GPUMemoryFull
+            expr: max(DCGM_FI_DEV_FB_USED / (DCGM_FI_DEV_FB_USED + DCGM_FI_DEV_FB_FREE)) > 0.95
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "GPU memory above 95%" }
+
+alertmanager:
+  enabled: true
+  nodeSelector: { role: ops }
+  persistence: { enabled: false }
+  config:
+    global: {}
+    route:
+      receiver: agent
+      group_by: [alertname]
+      group_wait: 20s
+      group_interval: 1m
+      repeat_interval: 5m
+    receivers:
+      - name: agent
+        webhook_configs:
+          - url: http://ic-agent.agent.svc:8080/alert
+            send_resolved: true

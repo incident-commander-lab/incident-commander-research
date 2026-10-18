@@ -1,0 +1,87 @@
+# Incident Commander in the cluster: the agent, OPA (the policy outside the agent) and the agent's
+# least-privilege access: read pods/logs/events/services in `shop`, and only the Deployment verbs its
+# actions need. No access to `chaos` (the answer key) or anything else.
+apiVersion: v1
+kind: Namespace
+metadata: { name: agent }
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata: { name: ic-agent, namespace: agent }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: ic-agent, namespace: shop }
+rules:
+  - { apiGroups: [""], resources: [pods, pods/log, events, services, endpoints], verbs: [get, list] }
+  - { apiGroups: [apps], resources: [deployments], verbs: [get, list, patch] }
+  - { apiGroups: [apps], resources: [deployments/scale], verbs: [get, patch, update] }
+  - { apiGroups: [apps], resources: [replicasets], verbs: [get, list] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: ic-agent, namespace: shop }
+subjects: [{ kind: ServiceAccount, name: ic-agent, namespace: agent }]
+roleRef: { kind: Role, name: ic-agent, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: incidents, namespace: agent }
+spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 256Mi } } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: opa, namespace: agent }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: opa } }
+  template:
+    metadata: { labels: { app: opa } }
+    spec:
+      nodeSelector: { role: ops }
+      containers:
+        - name: opa
+          image: openpolicyagent/opa:1.4.0-static
+          args: ["run", "--server", "--addr=0.0.0.0:8181", "/policy"]
+          volumeMounts: [{ name: policy, mountPath: /policy }]
+          resources: { requests: { cpu: 20m, memory: 32Mi }, limits: { memory: 128Mi } }
+      volumes: [{ name: policy, configMap: { name: opa-policy } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: opa, namespace: agent }
+spec: { selector: { app: opa }, ports: [{ port: 8181, targetPort: 8181 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: ic-agent, namespace: agent }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: ic-agent } }
+  template:
+    metadata: { labels: { app: ic-agent } }
+    spec:
+      serviceAccountName: ic-agent
+      nodeSelector: { role: ops }
+      securityContext: { fsGroup: 65534 }
+      containers:
+        - name: agent
+          image: ic/cluster-agent:1.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: AUTONOMY, value: "shadow" }          # shadow | suggest | act
+            - { name: VERIFY_SECONDS, value: "120" }
+            - { name: IC_PROVIDER, value: openrouter_models }
+            - { name: IC_OPENROUTER_MODELS, value: "ollama:qwen3:8b" }
+            - { name: IC_STRICT_PROVIDER, value: "1" }
+            - { name: IC_OLLAMA_BASE_URL, value: "http://host.k3d.internal:11434/v1" }   # AWS: ollama-agent.ai.svc
+            - { name: IC_LLM_TIMEOUT, value: "300" }
+          volumeMounts: [{ name: incidents, mountPath: /incidents }]
+          resources: { requests: { cpu: 100m, memory: 128Mi }, limits: { memory: 512Mi } }
+      volumes: [{ name: incidents, persistentVolumeClaim: { claimName: incidents } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: ic-agent, namespace: agent }
+spec: { selector: { app: ic-agent }, ports: [{ port: 8080, targetPort: 8080 }] }

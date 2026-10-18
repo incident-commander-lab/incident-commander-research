@@ -34,7 +34,10 @@ FAULTS = {
     "cpu_saturation_shop": ("juice-shop", "scale_out:juice-shop", []),
     "memory_leak_assistant": ("assistant", "rollout_undo:assistant", []),
     "gpu_memory_exhausted": ("assistant", "rollout_undo:assistant", ["rate_limit:assistant"]),
+    # shakedown only (SEEN): a release pointing the assistant at a wrong model address -> errors
+    "assistant_bad_url": ("assistant", "rollout_undo:assistant", []),
 }
+SEEN = {"assistant_bad_url"}   # used to shake the agent down; never scored as held-out
 BASE = {"NUM_CTX": "2048", "MAX_CONCURRENCY": "4", "RETAIN_ANSWERS": "false"}
 
 if os.environ.get("KUBERNETES_SERVICE_HOST"):
@@ -94,14 +97,18 @@ def inject(fault: str) -> dict:
         raise RuntimeError(f"a fault is already active: {_active()}")
     service, remedy, also = FAULTS[fault]
     fid = uuid.uuid4().hex[:8]
+    restore: dict = {}
     if fault == "cpu_saturation_shop":
         _surge(TIMEOUT_MIN + 1)
     elif fault == "memory_leak_assistant":
         _release("assistant", {"RETAIN_ANSWERS": "true"}, "routine release (answer cache)")
     elif fault == "gpu_memory_exhausted":
         _release("assistant", {"NUM_CTX": GPU_NUM_CTX}, "routine release (longer answers)")
+    elif fault == "assistant_bad_url":
+        restore = {"OLLAMA_URL": _env("assistant")["OLLAMA_URL"]}
+        _release("assistant", {"OLLAMA_URL": "http://model-gateway.ai.svc:11434"}, "routine release (model gateway)")
     record = {"fault_id": fid, "fault": fault, "service": service, "correct_remedy": remedy, "also_correct": also}
-    STATE.write_text(json.dumps({**record, "started": now()}))
+    STATE.write_text(json.dumps({**record, "started": now(), **({"restore": restore} if fault == "assistant_bad_url" else {})}))
     _seal({"event": "inject", **record})
     return record
 
@@ -113,6 +120,8 @@ def is_resolved(fault: str) -> bool:
         env = _env("assistant")
         if fault == "memory_leak_assistant":
             return env.get("RETAIN_ANSWERS", "false") != "true"
+        if fault == "assistant_bad_url":
+            return "model-gateway" not in env.get("OLLAMA_URL", "")
         if fault == "gpu_memory_exhausted":
             rate_limited = int(env.get("MAX_CONCURRENCY", BASE["MAX_CONCURRENCY"])) < int(BASE["MAX_CONCURRENCY"])
             return env.get("NUM_CTX") == BASE["NUM_CTX"] or rate_limited
@@ -132,6 +141,8 @@ def heal(reason: str = "manual") -> dict | None:
             batch.delete_namespaced_job("locust-surge", "load", propagation_policy="Background")
         except client.ApiException:
             pass
+    elif not already and fault == "assistant_bad_url":
+        _release("assistant", a["restore"], "release reverted")
     elif not already:
         _release("assistant", dict(BASE), "release reverted")
     _seal({"event": "end", "fault_id": a["fault_id"], "fault": fault,
@@ -168,7 +179,7 @@ def slots():
     threading.Thread(target=watch_resolution, daemon=True).start()
     seed = int(os.environ.get("CHAOS_SEED", "0")) or 1
     slot = float(os.environ.get("CHAOS_SLOT_MIN", str(TIMEOUT_MIN + 10)))
-    faults = [f for f in FAULTS if f in (os.environ.get("CHAOS_FAULTS") or ",".join(FAULTS)).split(",")]
+    faults = [f for f in FAULTS if f not in SEEN and f in (os.environ.get("CHAOS_FAULTS") or ",".join(FAULTS)).split(",")]
     _seal({"event": "schedule", "seed": seed, "slot_min": slot, "faults": faults, "timeout_min": TIMEOUT_MIN})
     t0 = time.time()
     for at, fault in slot_plan(seed, int(os.environ.get("CHAOS_SLOTS", "100")), faults, slot,
