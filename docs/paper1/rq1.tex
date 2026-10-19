@@ -1,0 +1,169 @@
+% Paper 1, RQ1 results. Every number is a macro from numbers_rq1.tex, generated from the
+% final audited snapshot (data/rq1-results/2026-10-15) and the offline evaluation
+% (data/rq1-eval/2026-10-19) by tools/rq1_numbers.py. Do not type numbers here.
+
+\section{RQ1: Who Should Choose the Checks?}
+\label{sec:rq1}
+
+We ran every condition once on each of the \nProblems{} AIOpsLab problems with each model
+(\nRuns{} runs in total; the 14B model was run on the four conditions that matter for the
+comparison). The problems split into \nDetection{} \emph{detection} tasks (``is there a
+fault?''), \nLocalization{} \emph{localization} tasks (``which service?'') and \nAnalysis{}
+\emph{analysis} tasks (``which system level and fault type?''). Every run was audited for
+tool failures, and all runs that read a check affected by a measurement defect were re-run
+on the corrected check catalog before any of the numbers below were computed.
+
+\subsection{A trivial baseline comes first}
+\label{sec:rq1-baseline}
+
+Of the \nDetection{} detection problems, \nDetFault{} contain a fault. An agent that answers
+``Yes'' without running any check therefore scores \accAlwaysYesDet{} on detection and
+\accAlwaysYes{} over all \nProblems{} problems. This baseline is as high as several of our
+conditions, so we report every accuracy separately for detection and for localization plus
+analysis (\nLocAna{} problems), and we read overall accuracy only next to it.
+
+\begin{table*}[t]
+\centering
+\caption{RQ1 accuracy (95\% Wilson interval) and cost per problem. Checks are paid checks per
+problem; tokens are LLM input plus output tokens per problem. Always answering ``Yes'' scores
+\accAlwaysYes{} overall and \accAlwaysYesDet{} on detection, with no checks and no tokens.}
+\label{tab:rq1-accuracy}
+\begin{tabular}{llccccc}
+\toprule
+Model & Condition & All (\nProblems) & Detection (\nDetection) & Loc.\,+\,analysis (\nLocAna) & Checks & Tokens \\
+\midrule
+\rqOneAccuracyRows
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\subsection{Accuracy}
+\label{sec:rq1-accuracy}
+
+Table~\ref{tab:rq1-accuracy} gives accuracy and cost, and Table~\ref{tab:rq1-paired} the paired
+comparisons of our rule (v2) with every other condition on the same problems.
+
+\textbf{Against the plain LLM agent.} Rule v2 is correct on \accOursEight{} and
+\accOursFourteen{} of problems (8B, 14B), against \accReactEight{} and \accReactFourteen{} for
+the ReAct agent ($p\pReactEight$ and $p\pReactFourteen$). The whole difference comes from
+detection. There the ReAct agent scores \accDetReactEight{} and \accDetReactFourteen{}, far below
+always answering ``Yes'', for two different reasons: with 8B it concluded ``no fault'' on
+\reactDetNoEight{} of the \nDetection{} problems, and with 14B it exhausted its step budget
+without an answer on \reactDetBudgetFourteen{} of them. On localization and analysis the two
+are not distinguishable (\accLAOursEight{} vs.\ \accLAReactEight{}, $p\pReactEightLA$;
+\accLAOursFourteen{} vs.\ \accLAReactFourteen{}, $p\pReactFourteenLA$).
+
+\textbf{Against an LLM choosing the checks.} When the LLM chooses the checks from the same
+hypotheses, accuracy is statistically tied with our rule on both models, overall
+($p\pChooseEight$, $p\pChooseFourteen$) and within each task group.
+
+\textbf{Against running every check.} On 8B, running every one of the available checks scores
+\accEveryEight{} against \accOursEight{} for our rule ($p\pEveryEight$).
+
+\textbf{On localization and analysis, no condition stands out.} Every condition scores between
+\accLAReactEight{} and \accLAChooseFourteen{} on these \nLocAna{} problems, the 95\% intervals
+of all conditions overlap, and no paired comparison is significant
+(Table~\ref{tab:rq1-paired}). On 8B, choosing the checks at random scores \accLARandomEight{},
+the same as our rule. We therefore do not claim that the rule finds root causes more accurately
+than the alternatives; on this benchmark, the step that limits root-cause accuracy is not the
+choice of checks. The live evaluation (RQ3), where we control the mix of
+faults, is designed to test accuracy beyond detection.
+
+\textbf{The original rule failed on the larger model.} Rule v1 scored \accVOneEight{} with 8B
+but \accVOneFourteen{} with 14B, and the drop is almost entirely on detection
+(\accDetVOneFourteen{}): with the 14B hypotheses it answered ``no fault'' on problems that had
+one. Rule v2 changes how the ``no fault'' hypothesis is updated and adds per-service catch-all
+causes; it restores detection to \accDetOursFourteen{} ($p\pVOneFourteenDet$ against v1 on 14B)
+and leaves localization and analysis unchanged. Rule v2 was designed after we saw these
+problems, so its accuracy here is not a held-out result; the live evaluation (RQ3) tests the frozen
+rule v2 on faults it has never seen.
+
+\begin{table}[t]
+\centering
+\caption{Paired comparisons on identical problems: problems only rule v2 solved / only the other
+condition solved, and the two-sided exact McNemar $p$.}
+\label{tab:rq1-paired}
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{llccc}
+\toprule
+Model & Comparison & All & Detection & Loc.\,+\,analysis \\
+\midrule
+\rqOnePairedRows
+\bottomrule
+\end{tabular}}
+\end{table}
+
+\subsection{Cost}
+\label{sec:rq1-cost}
+
+The rule reaches its accuracy with far less effort. Against the ReAct agent it uses
+\tokRatioReactEight{}$\times$ (8B) and \tokRatioReactFourteen{}$\times$ (14B) fewer tokens
+(\tokOursEight{} vs.\ \tokReactEight{} per problem on 8B) and runs \chkOursEight{} instead of
+\chkReactEight{} checks. Against the LLM choosing the checks, which is tied in accuracy, it uses
+\tokRatioChooseEight{}$\times$ and \tokRatioChooseFourteen{}$\times$ fewer tokens, because the
+LLM is called only to write hypotheses, not at every step. Against running every check it
+matches accuracy with \chkRatioEveryEight{}$\times$ fewer checks (\chkOursEight{} vs.\
+\chkEveryEight{}). The LLM chooser is the cheapest in checks on 14B (\chkChooseFourteen{} per
+problem) because it answered without running any check in \chooseZeroChkFourteen{} of
+\nProblems{} runs; of the \chooseZeroOkFourteen{} of those that were correct,
+\chooseZeroOkYesFourteen{} were detection ``Yes'' answers, which the baseline in
+Section~\ref{sec:rq1-baseline} already scores.
+
+\subsection{Calibration and failing checks}
+\label{sec:rq1-calibration}
+
+An agent that may act on its own needs a confidence it can be held to. We scored the final
+posterior of every condition that keeps one against correctness
+(Table~\ref{tab:rq1-calibration}), by task, since the base rates differ.
+
+\begin{table}[t]
+\centering
+\caption{Calibration of the final confidence, by task group: accuracy, mean confidence,
+expected calibration error (10 bins), Brier score, and coverage / accuracy when the agent abstains
+below 0.78, the act threshold of our live agent.}
+\label{tab:rq1-calibration}
+\setlength{\tabcolsep}{3pt}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lllccccc}
+\toprule
+Task & Model & Condition & Acc. & Conf. & ECE & Brier & Keep / acc.\ @0.78 \\
+\midrule
+\rqOneCalibRows
+\bottomrule
+\end{tabular}}
+\end{table}
+
+On detection, rule v2 is well calibrated (ECE \eceDetOursEight{} on 8B and \eceDetOursFourteen{}
+on 14B), and abstaining below 0.78 keeps \keepDetOursEight{} of problems at
+\keepAccDetOursEight{} accuracy (8B) and \keepDetOursFourteen{} at \keepAccDetOursFourteen{}
+(14B). On localization and analysis it is not: its mean confidence (\confLAOursEight{} on 8B,
+\confLAOursFourteen{} on 14B) far exceeds its accuracy (\accLAOursEight{}, \accLAOursFourteen{}),
+with ECE \eceLAOursEight{} and \eceLAOursFourteen{}; the problems it would keep at 0.78 are only
+\keepAccLAOursEight{} and \keepAccLAOursFourteen{} correct. The LLM chooser is similarly
+overconfident there. The posterior of rule v2 is therefore trustworthy for deciding \emph{whether} something is
+wrong, but not yet for deciding \emph{where}, and an autonomous action should not rest on its
+localization confidence alone. This is a limitation of the current rule, and the reason the live
+agent's act decision is gated by policy, verified after the fact and reverted when recovery does
+not hold.
+
+We also replayed every saved investigation with a share of its paid checks marked as failed
+(10--50\%), re-deciding from the remaining evidence. Over all problems accuracy appears to
+\emph{rise} as checks fail, but by task the rise is confined to detection: fewer healthy readings
+leave the posterior on ``some fault'', which the detection base rate rewards. On localization and
+analysis, accuracy is flat for every condition, while the confidence of rule v1 grows as evidence
+disappears. Robustness to failing checks should therefore be judged per task; we make no
+robustness claim from the pooled numbers.
+
+\subsection{What RQ1 shows}
+\label{sec:rq1-summary}
+
+RQ1 asked whether a fixed rule can choose checks and stop more efficiently than an LLM without
+losing accuracy. On this benchmark it can: rule v2 is tied in accuracy with an LLM choosing the
+checks and with running every check, at a fraction of the tokens or checks, and it is far more
+accurate than a plain ReAct agent. Two qualifications bound the claim. First, every accuracy
+difference we observe is on detection, and on detection all conditions should be read against
+an always-``Yes'' baseline that rule v2 does not exceed (\accDetOursEight{} vs.\
+\accAlwaysYesDet{}). Second, on localization and analysis no way of choosing checks, ours
+included, separates from random, and our rule's confidence there is overconfident. The efficiency
+result is robust; the accuracy result is a tie, not a win.
