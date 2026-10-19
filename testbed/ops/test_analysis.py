@@ -191,7 +191,8 @@ class ScheduleEventsTest(unittest.TestCase):
                 {"event": "schedule"}, {"event": "slot_delayed", "fault": "db_lock"},
                 {"event": "slot_delayed", "fault": "db_lock"}, {"event": "inject_failed", "fault": "api_down"},
                 {"event": "inject", "fault_id": "x"}]), encoding="utf-8")
-            self.assertEqual(load_schedule_events(key), {"slot_delayed": 2, "inject_failed": 1})
+            self.assertEqual(load_schedule_events(key),
+                             {"slot_delayed": 2, "inject_failed": 1, "slot_skipped_restart": 0})
 
 
 if __name__ == "__main__":

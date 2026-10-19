@@ -78,7 +78,7 @@ def load_schedule_events(path: Path) -> dict[str, int]:
     """Counts of the answer-key events that are about the schedule, not a fault. A `slot_delayed`
     (a fault still active when the next slot began) or an `inject_failed` is a test-bed problem
     the session report must show (RQ3_PROTOCOL.md, "What a session reports")."""
-    counts = {"slot_delayed": 0, "inject_failed": 0}
+    counts = {"slot_delayed": 0, "inject_failed": 0, "slot_skipped_restart": 0}
     for line in path.read_text(encoding="utf-8").splitlines():
         if line.strip():
             ev = json.loads(line).get("event")
@@ -711,7 +711,7 @@ def main(argv: list[str]):
     m = match(faults, incidents)
     print(report(m))
     ev = load_schedule_events(Path(argv[0]))
-    print(f"test-bed events: slot_delayed {ev['slot_delayed']}, inject_failed {ev['inject_failed']}")
+    print("test-bed events: " + ", ".join(f"{k} {v}" for k, v in ev.items()))
     errs = errors_by_fault(faults, load_agent_errors(Path(argv[1])))
     for f in m.missed:
         for msg in errs.get(f.fault_id, []):

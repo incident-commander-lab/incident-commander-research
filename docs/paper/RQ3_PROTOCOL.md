@@ -6,8 +6,8 @@ scored session; any later change is listed under "Changes" with its date and rea
 **Status:** ready to lock (19 Oct). All open decisions are answered (see "Changes"). It is
 locked when this file is merged and tagged `rq3-protocol-locked`, before the first scored
 session. The scorer (`testbed/ops/testbed_ops/score.py`, `analyze` for the comparison)
-implements this file exactly. The only thing left before the lock is choosing the six
-recordings (see "Changes").
+implements this file exactly. Left before the lock: making the six recordings and one smoke
+session per agent (see "Changes").
 
 ## Question and hypotheses
 
@@ -182,9 +182,26 @@ One round of 9 faults takes 3 h 45 min plus about 25 minutes to settle. Any `slo
 event (a fault still active when the next slot starts) is counted in the session report.
 
 **Seeds.** A pre-registered list, one seed per round: 101, 102, 103, 104, 105, 106. Every setup
-runs the same list, so fault *i* is the same fault in every setup. Each seed is paired with
-one traffic recording (`REPLAY_FILE`), chosen before the first scored session and the same for
-every setup.
+runs the same list, so fault *i* is the same fault in every setup. Each seed is one session
+of one round (`./run-session.sh <agent> 1 <seed> seed<seed>.ndjson`).
+
+**Recordings.** Each seed replays one recording, the same for every setup, chosen by this rule
+(`testbed_ops.recordings`, fixed before any session):
+- A window qualifies if it is at least **4.5 hours** of recorded traffic (a round takes about
+  4.2 h) with **no gap above 60 s** between consecutive events and events in time order.
+- Seeds 101–106 take the first qualifying window starting at **00, 04, 08, 12, 16 and 20 UTC**
+  respectively, so the six cover the daily load cycle (and each setup sees all six).
+- Each recording's SHA-256 is written under "Changes" when it is made, and every session header
+  names its recording; a different file for the same seed is refused by `score analyze`.
+
+**Replay fidelity.** Replay is anchored to `SESSION_START`, shared by the replay and the fault
+schedule, so the traffic at a given minute of the session is the same whatever the agents did
+(a restarted collector seeks to the current minute instead of starting the file over). The
+replay source is unavailable exactly when the live one would be: while the configured stream
+URL is wrong (`bad_config_collector`) or the egress relay is down (`upstream_cut`), events are
+dropped and the source reports disconnected, so both faults keep their real symptoms. Events
+missed during an outage are not delivered later (live would resume part of the backlog); this
+is the same for every setup.
 
 **Pilot.** The first 2 rounds per setup (seeds 101–102, 18 faults) are a pilot. Rules, fixed
 now:
@@ -227,8 +244,8 @@ same seed.
 
 ## What a session reports
 
-1. The session header (the frozen settings above), and the count of `slot_delayed` and
-   `inject_failed` events.
+1. The session header (the frozen settings above), and the count of `slot_delayed`,
+   `inject_failed` and `slot_skipped_restart` events.
 2. Every metric above, split into seen, unseen and natural.
 3. The calibration table, per setup.
 4. A list of every harmful action (including on duplicate incidents) and every missed fault,
@@ -273,8 +290,22 @@ Reviewed by Nour as evaluation lead. The body of this file already reflects ever
   statsmodels.
 - Fixed 19 Oct: the scorer counted an escalation with the proposal `none` as unneeded; the
   protocol says it is needed. It mattered only once `upstream_cut` existed.
-- Still needed before the lock: choose the six recordings for seeds 101–106, each at least as
-  long as a session.
+- Fixed 19 Oct, found while choosing recordings: under replay as first written, `upstream_cut`
+  and `bad_config_collector` had **no effect** (the collector read a local file, not the
+  network), and any collector restart **rewound** the traffic to the start of the file, so two
+  agents would not have seen the same traffic. Replay is now anchored to `SESSION_START` and
+  gated on the URL and the egress relay (`testbed/app/src/replay.js`, tests in
+  `testbed/app/test/replay.test.js`). The fault injector uses the same `SESSION_START` and
+  does not re-inject past slots if it restarts (`slot_skipped_restart`, counted in the report).
+- Still needed before the lock:
+  1. Make the six recordings: `python -m testbed_ops.recordings scan ../recordings` lists the
+     windows that qualify and the assignment the rule gives; `make` builds each `seed<N>.ndjson`;
+     record each SHA-256 here. Recordings must be made on the machine that has the hourly
+     files (the live test bed's host); if a start hour has no qualifying window yet, record
+     live until it does.
+  2. One smoke session per agent on a seen fault set (`CHAOS_FAULTS=bad_release_worker,db_lock`,
+     not scored) to confirm replay, `SESSION_START` and the header end to end in Docker. The
+     Docker path cannot be run on the machine these changes were written on.
 
 **How the secondary tests are computed:** each one-sided p-value comes from inverting the same
 Newcombe interval that is reported (the level at which its lower limit reaches the bound), so

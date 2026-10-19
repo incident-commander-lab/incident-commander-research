@@ -42,6 +42,7 @@ services:
       USER_AGENT: ${USER_AGENT:-pulse-testbed/0.1 (research test bed)}
       REPLAY_FILE: ${REPLAY_FILE:-}
       REPLAY_SPEED: ${REPLAY_SPEED:-1}
+      SESSION_START: ${SESSION_START:-}   # epoch seconds; replay and fault schedule share it
     volumes: ["./recordings:/recordings", "releases:/releases:ro"]
     user: root   # writes recordings to the bind mount
     # reach Wikimedia through the egress relay (the "internet path" the upstream_cut fault breaks)
@@ -114,6 +115,7 @@ services:
       CHAOS_SLOT_MIN: ${CHAOS_SLOT_MIN:-25}    # slots mode: one fault per slot
       CHAOS_SLOTS: ${CHAOS_SLOTS:-100}
       CHAOS_JITTER_MIN: ${CHAOS_JITTER_MIN:-3}
+      SESSION_START: ${SESSION_START:-}        # epoch seconds; replay and fault schedule share it
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - releases:/releases

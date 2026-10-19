@@ -6,6 +6,7 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { cfg, log, metrics, redis, release, serveMetrics, sleep } from './common.js';
 import { createSSEParser, normalizeWikimedia } from './sources.js';
+import { egressProbe, runReplay, urlOk } from './replay.js';
 
 const URL_ = process.env.WIKIMEDIA_URL || 'https://stream.wikimedia.org/v2/stream/recentchange';
 // Wikimedia asks every client to identify itself with a contact (User-Agent policy).
@@ -97,21 +98,47 @@ async function live() {
 }
 
 // ---------------------------------------------------------------- replay mode
+// See replay.js: anchored to SESSION_START (epoch seconds, shared with the fault injector), and
+// unavailable whenever the live source would be (wrong URL, egress relay down).
 async function replay() {
-  log('info', 'replaying', { file: REPLAY_FILE, speed: REPLAY_SPEED });
-  connected.set({ source: 'wikipedia' }, 1);
-  const rl = readline.createInterface({ input: fs.createReadStream(REPLAY_FILE) });
-  let t0 = null, w0 = null;
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    const { recv_ts, data } = JSON.parse(line);
-    const t = Date.parse(recv_ts);
-    if (t0 == null) { t0 = t; w0 = Date.now(); }
-    const due = w0 + (t - t0) / REPLAY_SPEED;     // keep the original timing (bursts included)
-    if (due > Date.now()) await sleep(due - Date.now());
-    await enqueue(data);
+  const startMs = process.env.SESSION_START ? Number(process.env.SESSION_START) * 1000 : Date.now();
+  const urlGood = urlOk(URL_);
+  const probe = egressProbe({
+    host: process.env.EGRESS_PROBE_HOST || 'stream.wikimedia.org',   // the egress relay (extra_hosts)
+    port: Number(process.env.EGRESS_PROBE_PORT || 8443),
+    onChange: (ok) => log(ok ? 'info' : 'warn', ok ? 'egress reachable' : 'egress unreachable'),
+  });
+  const available = () => urlGood && probe.up();
+  let shown = null;
+  const gauge = () => {
+    const ok = available();
+    isConnected = ok;
+    connected.set({ source: 'wikipedia' }, ok ? 1 : 0);
+    if (ok !== shown) {
+      if (!ok) reconnects.inc({ source: 'wikipedia' });
+      shown = ok;
+    }
+  };
+  gauge();
+  const gaugeTimer = setInterval(gauge, 1000);
+  if (!urlGood) log('warn', 'source disconnected', { source: 'wikipedia', error: `HTTP 404 ${URL_}` });
+  log('info', 'replaying', { file: REPLAY_FILE, speed: REPLAY_SPEED, session_start: new Date(startMs).toISOString() });
+
+  async function* records() {
+    const rl = readline.createInterface({ input: fs.createReadStream(REPLAY_FILE) });
+    for await (const line of rl) {
+      if (line.trim()) yield JSON.parse(line);
+    }
   }
-  log('info', 'replay finished', { file: REPLAY_FILE });
+  const stats = await runReplay(records(), {
+    startMs, speed: REPLAY_SPEED, now: Date.now, sleep, available,
+    emit: enqueue,
+    drop: () => skipped.inc({ source: 'wikipedia', reason: 'source_unavailable' }),
+  });
+  clearInterval(gaugeTimer);
+  probe.stop();
+  log('info', 'replay finished', { file: REPLAY_FILE, ...stats });
+  isConnected = false;
   connected.set({ source: 'wikipedia' }, 0);
 }
 

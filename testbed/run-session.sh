@@ -75,7 +75,11 @@ $DC run --rm --no-deps --entrypoint sh chaos -c 'rm -f /sealed/ground_truth.json
 export AGENT_KIND=$KIND AUTONOMY=act CHAOS_MODE=slots CHAOS_SEED=$SEED CHAOS_SLOTS=$SLOTS \
        CHAOS_SLOT_MIN=$SLOT FAULT_TIMEOUT_MIN=$TIMEOUT AGENT_MODEL=$MODEL \
        REPLAY_FILE=/recordings/$RECORDING REPLAY_SPEED=1
-$DC up -d --build >/dev/null
+$DC build >/dev/null
+# one clock for the traffic replay and the fault schedule, set after the build so build time
+# cannot shift one against the other; 45 s leaves time for every container to start
+export SESSION_START=$(( $(date +%s) + 45 ))
+$DC up -d --force-recreate >/dev/null
 python3 - "$OUT/header.json" <<PY
 import json, subprocess, sys, platform, datetime
 commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
@@ -83,7 +87,7 @@ dirty = bool(subprocess.run(["git", "status", "--porcelain", "--", "."], capture
 json.dump({"session": "$ID", "started_utc": datetime.datetime.utcnow().isoformat(timespec="seconds"),
            "git_commit": commit, "uncommitted_changes": dirty, "AGENT_KIND": "$KIND", "AUTONOMY": "act",
            "AGENT_MODEL": "$MODEL", "model_digest": "$DIGEST", "llm_temperature": $TEMPERATURE,
-           "REPLAY_FILE": "$RECORDING", "CHAOS_MODE": "slots", "CHAOS_SEED": $SEED,
+           "REPLAY_FILE": "$RECORDING", "SESSION_START": $SESSION_START, "CHAOS_MODE": "slots", "CHAOS_SEED": $SEED,
            "CHAOS_ROUNDS": $ROUNDS, "CHAOS_FAULT_TYPES": $TYPES, "CHAOS_SLOTS": $SLOTS,
            "CHAOS_SLOT_MIN": $SLOT, "FAULT_TIMEOUT_MIN": $TIMEOUT, "VERIFY_SECONDS": 120,
            "COST_ACT": 2, "COST_ESCALATE": 15, "COST_HARM": 60,
@@ -92,7 +96,7 @@ PY
 echo "$ID  started $(date '+%F %H:%M')  agent=$KIND seed=$SEED faults=$SLOTS  report: testbed/$OUT/report.txt" > sessions/.current
 
 # wait for the last slot's fault to end for its fault to end (timeout) and the agent to settle
-WAIT=$(python3 -c "print(int($SLOTS * $SLOT * 60 + ($TIMEOUT + 8) * 60))")
+WAIT=$(python3 -c "print(int($SESSION_START - $(date +%s) + $SLOTS * $SLOT * 60 + ($TIMEOUT + 8) * 60))")
 nohup caffeinate -i "$0" _finish "$ID" "$WAIT" > "$OUT/runner.log" 2>&1 &
 echo "Session $ID running: $SLOTS faults, about $(python3 -c "print(round($WAIT/3600, 1))") h."
 echo "Grafana http://localhost:3301 · agent http://localhost:8380/incidents · progress: ./run-session.sh status"
