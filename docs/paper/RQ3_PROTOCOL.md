@@ -5,9 +5,9 @@ scored session; any later change is listed under "Changes" with its date and rea
 
 **Status:** ready to lock (19 Oct). All open decisions are answered (see "Changes"). It is
 locked when this file is merged and tagged `rq3-protocol-locked`, before the first scored
-session. The scorer (`testbed/ops/testbed_ops/score.py`) implements this file exactly; the
-analyses added on 19 Oct (non-inferiority intervals, Holm correction) must be in the scorer
-before the lock.
+session. The scorer (`testbed/ops/testbed_ops/score.py`, `analyze` for the comparison)
+implements this file exactly. The only thing left before the lock is choosing the six
+recordings (see "Changes").
 
 ## Question and hypotheses
 
@@ -206,11 +206,10 @@ variance is part of what is measured, not removed.
   test**, paired fault by fault over the 54 injected faults, two-sided, α = 0.05. Harmful
   actions on natural incidents are not paired (they need not recur in every setup) and are
   reported descriptively.
-- **Secondary (H3b, H3c, H3d):** one family, **Holm–Bonferroni** across the three, family-wise
-  α = 0.05.
-  - H3b: autonomous resolution, setup 1 vs 2, paired; McNemar's exact test plus the
-    non-inferiority interval (Newcombe's hybrid score interval for paired proportions) against
-    δ = 10 points.
+- **Secondary (H3b, H3c, H3d):** one family, **Holm–Bonferroni** across the three at one-sided
+  0.025 (the level of the 95% intervals); p-values by inverting the reported intervals.
+  - H3b: autonomous resolution, setup 1 vs 2, paired; the non-inferiority interval
+    (Newcombe's hybrid score interval for paired proportions) against δ = 10 points.
   - H3c: share of escalations that were needed, setup 1 vs 2 (not paired: escalations differ
     per setup); difference with Newcombe's hybrid score interval for independent proportions.
   - H3d: unseen vs seen within setup 1 (not paired); Newcombe's interval for independent
@@ -265,13 +264,23 @@ Reviewed by Nour as evaluation lead. The body of this file already reflects ever
    flag (covering the rule agent, the plain LLM agent and the scorer), the model's Ollama
    digest, the LLM temperature and the replay file. A pre-registered seed list (101–106).
 
-**Still needed before the lock (implementation, not protocol):**
-- `run-session.sh`: take a replay file, record the model digest and temperature in the header,
-  and refuse a `CHAOS_SLOTS` that is not a multiple of the number of fault types. (Shahesta)
-- `score.py`: Newcombe hybrid score intervals (paired and independent), the non-inferiority
-  verdict against δ, Holm–Bonferroni across H3b–H3d, calibration per setup, and the
-  `slot_delayed` / `inject_failed` counts, with tests. (Nour)
-- Choose and record the six recordings for seeds 101–106. (Both)
+**Implementation (all owned by Nour):**
+- Done 19 Oct: `run-session.sh` takes rounds (not hours) and a recording, and records the model
+  digest, temperature and recording in the header. `score.py analyze` runs the whole plan
+  (pairing by seed, H3a McNemar, Newcombe intervals, non-inferiority, Holm, calibration per
+  setup, `slot_delayed` / `inject_failed` counts, validity warnings), tested in
+  `test_analysis.py`; the independent interval reproduces Newcombe (1998) Table II and
+  statsmodels.
+- Fixed 19 Oct: the scorer counted an escalation with the proposal `none` as unneeded; the
+  protocol says it is needed. It mattered only once `upstream_cut` existed.
+- Still needed before the lock: choose the six recordings for seeds 101–106, each at least as
+  long as a session.
+
+**How the secondary tests are computed:** each one-sided p-value comes from inverting the same
+Newcombe interval that is reported (the level at which its lower limit reaches the bound), so
+the test and the interval always agree. Holm is applied at one-sided 0.025, the level of the
+95% intervals. H3b is judged by its non-inferiority interval only (McNemar tests a difference,
+not non-inferiority).
 
 ### Proposed 15 Oct (Shahesta + Claude)
 

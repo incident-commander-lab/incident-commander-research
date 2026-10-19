@@ -78,9 +78,18 @@ for scoring (after a session, never during):
 ## Scored sessions (RQ3)
 
 ```bash
-./run-session.sh rule 5 101     # our frozen rule v2, 5 hours, seed 101 (about 12 faults)
-./run-session.sh llm  5 101     # the plain LLM agent on the SAME schedule
-./run-session.sh status         # progress; the answer key stays sealed until the end
+./run-session.sh rule 1 101 seed101.ndjson   # frozen rule v2, 1 round (9 faults, ~4.2 h), seed 101
+./run-session.sh llm  1 101 seed101.ndjson   # the plain LLM agent on the SAME schedule and traffic
+./run-session.sh status                      # progress; the answer key stays sealed until the end
+```
+
+Sessions run **whole rounds** (every fault type once per round) and **replay** a recording from
+`recordings/` that lasts at least as long as the session. The header records the repo commit,
+the model's Ollama digest, the LLM temperature and the recording. Analyse all sessions of both
+agents at once (paired by seed; the pre-registered H3a-H3d tests):
+
+```bash
+cd ops && python -m testbed_ops.score analyze ../sessions/*-seed*
 ```
 
 A session wipes the answer key, archives old incidents, starts the chosen agent at
