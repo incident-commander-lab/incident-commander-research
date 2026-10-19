@@ -198,6 +198,24 @@ what next.
 - **Blocked on:** anything waiting for the other person or for something outside.
 - If the overall plan changed, update "Remaining overall" below the entries.
 
+### 19 Oct 2026 (evening), Nour
+
+**Done** (PR #7, branch `paper/rq1-results`, stacked on PR #6): Paper 1's RQ1 results section,
+`docs/paper1/rq1.tex`. Every number comes from `docs/paper1/tools/rq1_numbers.py`, which
+regenerates `numbers_rq1.tex` from the final snapshot; `numbers.tex` no longer has provisional
+RQ1 values. Not compiled yet (no TeX on my machine).
+
+**Next, Shahesta:**
+1. Review PR #6, then PR #7, and compile the paper (Overleaf or locally).
+2. Decide the four intro edits listed in PR #7 (final numbers, "a third of the tokens" holds on
+   8B only, contribution 3 needs the detection caveat, "six conditions" lists five).
+3. Force-add `docs/study-guide/tools/` (`git add -f`): the root `.gitignore` rule `tools/` kept
+   `audit_runs.py` and `make_charts.py` out of the repo.
+4. The PR #5 items below (recordings, smoke sessions).
+
+**Next, Nour:** once PR #5 is locked, the RQ3 pilot; meanwhile, the RQ2 results section with
+generated numbers, the same way as RQ1.
+
 ### 19 Oct 2026 (later), Nour
 
 **Done** (PR #6, branch `eval/rq1-final`): calibration and evidence failure rerun on the final RQ1
@@ -247,7 +265,7 @@ finding 3 (localization overconfidence) as a stated limitation.
 | Track | What is left | Who |
 |---|---|---|
 | RQ3 live benchmark | lock the protocol (above) → pilot: seeds 101–102 for both agents → check the disagreement rate → seeds 103–106 → `score analyze` | Both; Nour scores |
-| RQ1 | write-up with per-task accuracy and the per-task calibration results (evaluation done: PR #6) | Nour |
-| Paper 1 | everything after the introduction: RQ1, RQ2, RQ3 results and discussion | Both |
+| RQ1 | done: evaluation (PR #6) and results section (PR #7), in review | Nour |
+| Paper 1 | intro edits (PR #7); method section; RQ2 and RQ3 results; discussion | Both |
 | Paper 2 (Upgrade Paradox) | Experiment 2 and a second model family; note the 8B → 14B gap alone is inside the intervals | Shahesta |
 | Mentor-scale test bed | days 1–3 done locally (k3d); move to AWS Stockholm Spot | Shahesta |
