@@ -1,11 +1,16 @@
 #!/bin/bash
 # One scored RQ3 session (docs/paper/RQ3_PROTOCOL.md). Runs in the background; the report is
-# written at the end. Both agents given the same SEED get the same faults at the same times.
+# written at the end. Both agents given the same SEED get the same faults at the same times,
+# on the same replayed traffic.
 #
-#   ./run-session.sh rule 5 101      # our frozen rule v2, 5 hours, seed 101
-#   ./run-session.sh llm  5 101      # plain LLM agent, same schedule
-#   ./run-session.sh status          # what is running, faults so far (answer key stays sealed)
+#   ./run-session.sh rule 2 101 seed101.ndjson   # frozen rule v2, 2 rounds, seed 101, replaying
+#                                                # testbed/recordings/seed101.ndjson
+#   ./run-session.sh llm  2 101 seed101.ndjson   # plain LLM agent, same schedule and traffic
+#   ./run-session.sh status                      # what is running, faults so far (key stays sealed)
 #
+# A session is whole rounds only: every fault type once per round (9 slots of 25 min, about
+# 3 h 45 min, plus ~25 min to settle). The recording must last at least as long as the session:
+# when a replay file ends, the stream stops and the collector's alerts fire.
 # Needs: Docker Desktop, Ollama with AGENT_MODEL (default qwen3:8b). Keep the laptop plugged in.
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -34,18 +39,29 @@ if [ "${1:-}" = "status" ]; then
   exit 0
 fi
 
-KIND=${1:?usage: ./run-session.sh rule|llm <hours> <seed>}; HOURS=${2:?hours}; SEED=${3:?seed}
+USAGE="usage: ./run-session.sh rule|llm <rounds> <seed> <recording in testbed/recordings>"
+KIND=${1:?$USAGE}; ROUNDS=${2:?$USAGE}; SEED=${3:?$USAGE}; RECORDING=${4:?$USAGE}
 [ "$KIND" = rule ] || [ "$KIND" = llm ] || { echo "agent must be rule or llm"; exit 1; }
+[[ "$ROUNDS" =~ ^[1-9][0-9]*$ ]] || { echo "rounds must be a whole number >= 1 (RQ3_PROTOCOL.md: whole rounds only)"; exit 1; }
+[ -f "recordings/$RECORDING" ] || { echo "no recording testbed/recordings/$RECORDING (every scored session replays one)"; exit 1; }
 [ -f sessions/.current ] && { echo "a session is already running:"; cat sessions/.current; exit 1; }
 MODEL=${AGENT_MODEL:-qwen3:8b}
+TEMPERATURE=0.3   # set in agent.py and llm_agent.py; recorded so the header says what ran
 TIMEOUT=${FAULT_TIMEOUT_MIN:-15}; SLOT=${CHAOS_SLOT_MIN:-25}
-SLOTS=$(python3 -c "print(max(1, int($HOURS * 60 // $SLOT)))")
+if [ -n "${CHAOS_FAULTS:-}" ]; then TYPES=$(echo "$CHAOS_FAULTS" | tr ',' '\n' | grep -c .); else TYPES=9; fi
+SLOTS=$((ROUNDS * TYPES))
 ID="$(date +%Y%m%d-%H%M)-$KIND-seed$SEED"; OUT="sessions/$ID"
-mkdir -p "$OUT"
 
 pgrep -f "ic.bench.ladder run" >/dev/null && echo "WARNING: the model ladder is running and shares the laptop's model server; the session will be slower than usual."
 curl -sf -m 5 http://localhost:11434/api/tags >/dev/null || { nohup ollama serve >/dev/null 2>&1 & sleep 4; }
 ollama show "$MODEL" >/dev/null 2>&1 || { echo "model $MODEL is not pulled: ollama pull $MODEL"; exit 1; }
+# the tag can move to new weights; the digest identifies exactly what ran
+DIGEST=$(curl -sf http://localhost:11434/api/tags | python3 -c "
+import json, sys
+m = sys.argv[1]
+print(next((x['digest'] for x in json.load(sys.stdin)['models'] if x['name'] in (m, m + ':latest')), ''))" "$MODEL")
+[ -n "$DIGEST" ] || { echo "could not read the digest of $MODEL from Ollama"; exit 1; }
+mkdir -p "$OUT"
 
 # fresh answer key and incident folder; earlier incidents are archived, never deleted
 if ls incidents/*.json >/dev/null 2>&1; then
@@ -57,23 +73,30 @@ $DC stop chaos agent >/dev/null 2>&1 || true
 $DC run --rm --no-deps --entrypoint sh chaos -c 'rm -f /sealed/ground_truth.jsonl /sealed/active.json' >/dev/null
 
 export AGENT_KIND=$KIND AUTONOMY=act CHAOS_MODE=slots CHAOS_SEED=$SEED CHAOS_SLOTS=$SLOTS \
-       CHAOS_SLOT_MIN=$SLOT FAULT_TIMEOUT_MIN=$TIMEOUT AGENT_MODEL=$MODEL
-$DC up -d --build >/dev/null
+       CHAOS_SLOT_MIN=$SLOT FAULT_TIMEOUT_MIN=$TIMEOUT AGENT_MODEL=$MODEL \
+       REPLAY_FILE=/recordings/$RECORDING REPLAY_SPEED=1
+$DC build >/dev/null
+# one clock for the traffic replay and the fault schedule, set after the build so build time
+# cannot shift one against the other; 45 s leaves time for every container to start
+export SESSION_START=$(( $(date +%s) + 45 ))
+$DC up -d --force-recreate >/dev/null
 python3 - "$OUT/header.json" <<PY
 import json, subprocess, sys, platform, datetime
 commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True).stdout.strip()
 dirty = bool(subprocess.run(["git", "status", "--porcelain", "--", "."], capture_output=True, text=True).stdout.strip())
 json.dump({"session": "$ID", "started_utc": datetime.datetime.utcnow().isoformat(timespec="seconds"),
            "git_commit": commit, "uncommitted_changes": dirty, "AGENT_KIND": "$KIND", "AUTONOMY": "act",
-           "AGENT_MODEL": "$MODEL", "CHAOS_MODE": "slots", "CHAOS_SEED": $SEED, "CHAOS_SLOTS": $SLOTS,
+           "AGENT_MODEL": "$MODEL", "model_digest": "$DIGEST", "llm_temperature": $TEMPERATURE,
+           "REPLAY_FILE": "$RECORDING", "SESSION_START": $SESSION_START, "CHAOS_MODE": "slots", "CHAOS_SEED": $SEED,
+           "CHAOS_ROUNDS": $ROUNDS, "CHAOS_FAULT_TYPES": $TYPES, "CHAOS_SLOTS": $SLOTS,
            "CHAOS_SLOT_MIN": $SLOT, "FAULT_TIMEOUT_MIN": $TIMEOUT, "VERIFY_SECONDS": 120,
-           "COST_ACT": 2, "COST_ESCALATE": 15, "COST_HARM": 60, "hours": $HOURS,
+           "COST_ACT": 2, "COST_ESCALATE": 15, "COST_HARM": 60,
            "host": platform.node() + " " + platform.platform()}, open(sys.argv[1], "w"), indent=1)
 PY
 echo "$ID  started $(date '+%F %H:%M')  agent=$KIND seed=$SEED faults=$SLOTS  report: testbed/$OUT/report.txt" > sessions/.current
 
-# the last slot starts before HOURS; wait for its fault to end (timeout) and the agent to settle
-WAIT=$(python3 -c "print(int($SLOTS * $SLOT * 60 + ($TIMEOUT + 8) * 60))")
+# wait for the last slot's fault to end for its fault to end (timeout) and the agent to settle
+WAIT=$(python3 -c "print(int($SESSION_START - $(date +%s) + $SLOTS * $SLOT * 60 + ($TIMEOUT + 8) * 60))")
 nohup caffeinate -i "$0" _finish "$ID" "$WAIT" > "$OUT/runner.log" 2>&1 &
 echo "Session $ID running: $SLOTS faults, about $(python3 -c "print(round($WAIT/3600, 1))") h."
 echo "Grafana http://localhost:3301 · agent http://localhost:8380/incidents · progress: ./run-session.sh status"

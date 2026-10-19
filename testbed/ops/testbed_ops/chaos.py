@@ -227,10 +227,18 @@ def slots():
     slot = float(os.environ.get("CHAOS_SLOT_MIN", str(TIMEOUT_MIN + 10)))
     plan = slot_plan(seed, int(os.environ.get("CHAOS_SLOTS", "100")), _faults(), slot,
                      float(os.environ.get("CHAOS_JITTER_MIN", "3")))
+    # SESSION_START (epoch seconds) is shared with the traffic replay, so faults and traffic stay
+    # aligned however long the build took. If the injector restarts mid-session, slots already
+    # past are not injected again.
+    start = os.environ.get("SESSION_START")
+    t0 = float(start) if start else time.time()
+    restarted = start is not None and time.time() > t0 + 60
     _seal({"event": "schedule", "seed": seed, "slot_min": slot, "faults": _faults(),
-           "timeout_min": TIMEOUT_MIN})
-    t0 = time.time()
+           "timeout_min": TIMEOUT_MIN, "session_start": t0, "restarted": restarted})
     for at, fault in plan:
+        if restarted and t0 + at * 60 < time.time():
+            _seal({"event": "slot_skipped_restart", "fault": fault})
+            continue
         time.sleep(max(0.0, t0 + at * 60 - time.time()))
         while _active():            # never happens when slot > timeout; recorded if it does
             _seal({"event": "slot_delayed", "fault": fault})
