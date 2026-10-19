@@ -185,3 +185,56 @@ The repo still contains the Phase 1 demo: a mock `shop-svc`, an SLO detector, th
 ## License and authors
 
 MIT, see `LICENSE`. Shahesta Salama · Nourseen Tarek · Alryada University.
+
+## Updates
+
+Our shared log: open the repo, read the newest entry, and you know where we stand and who does
+what next.
+
+**How to add an entry** (every time either of us finishes something):
+- Put it at the **top** of this list, dated, with your name.
+- **Done:** what you finished, with the PR or commit.
+- **Next:** the next task for each of us, concrete enough to start without asking.
+- **Blocked on:** anything waiting for the other person or for something outside.
+- If the overall plan changed, update "Remaining overall" below the entries.
+
+### 19 Oct 2026, Nour
+
+**Done** (PR #5, branch `eval/rq3-protocol-lock`, draft):
+- RQ3 protocol decisions: accepted Shahesta's 15 Oct proposals with amendments; added H3a as the
+  primary endpoint, non-inferiority (δ = 10 points) for H3b/H3d, Holm across H3b–H3d, sample size
+  from a McNemar power analysis (6 rounds = 54 paired faults per agent), replayed traffic, full
+  freeze (commit, model digest, temperature, recording), seeds 101–106.
+- `score.py analyze`: the whole pre-registered analysis, tested (Newcombe intervals reproduce the
+  published values). Fixed: an escalation proposing `none` was scored as unneeded.
+- Replay fixed: `upstream_cut` and `bad_config_collector` had no effect under replay, and a
+  collector restart rewound the traffic. Replay now follows a shared `SESSION_START` and fails
+  like the live stream. New tool `testbed_ops.recordings` to build the per-seed recordings.
+- `run-session.sh` now takes `<agent> <rounds> <seed> <recording>`.
+
+**Next, Shahesta** (to close PR #5; needs your Mac: Docker and the hourly recordings):
+1. Review PR #5.
+2. `cd testbed/ops && python -m testbed_ops.recordings scan ../recordings`, then `make` the six
+   `seed101.ndjson` … `seed106.ndjson` the rule assigns (record live first if a start hour has no
+   qualifying window). Post the six SHA-256 values on the PR.
+3. One unscored smoke session per agent:
+   `CHAOS_FAULTS=bad_release_worker,db_lock ./run-session.sh rule 1 101 seed101.ndjson`, same with
+   `llm`. Check that `header.json` has the digest and `SESSION_START`, and that the report runs.
+
+**Next, Nour:**
+1. Write the six SHA-256 values into the protocol, merge PR #5, tag `rq3-protocol-locked`.
+2. Meanwhile: rerun calibration and evidence-failure (`ic/eval`) on the final RQ1 file
+   (`data/rq1-results/2026-10-15/`), then the RQ1 write-up with per-task numbers and the
+   always-"Yes" baseline.
+
+**Blocked on:** the recordings and smoke sessions (Shahesta's Mac).
+
+### Remaining overall
+
+| Track | What is left | Who |
+|---|---|---|
+| RQ3 live benchmark | lock the protocol (above) → pilot: seeds 101–102 for both agents → check the disagreement rate → seeds 103–106 → `score analyze` | Both; Nour scores |
+| RQ1 | calibration/evidence-failure on the final file; write-up with per-task accuracy | Nour |
+| Paper 1 | everything after the introduction: RQ1, RQ2, RQ3 results and discussion | Both |
+| Paper 2 (Upgrade Paradox) | Experiment 2 and a second model family; note the 8B → 14B gap alone is inside the intervals | Shahesta |
+| Mentor-scale test bed | days 1–3 done locally (k3d); move to AWS Stockholm Spot | Shahesta |
