@@ -198,6 +198,19 @@ what next.
 - **Blocked on:** anything waiting for the other person or for something outside.
 - If the overall plan changed, update "Remaining overall" below the entries.
 
+### 19 Oct 2026 (later), Nour
+
+**Done** (PR #6, branch `eval/rq1-final`): calibration and evidence failure rerun on the final RQ1
+snapshot, overall and per task (`data/rq1-eval/2026-10-19/`). Key results: the accuracy gain under
+failing checks is entirely on detection (a base-rate effect); rule v2 is well calibrated on
+detection (ECE 0.05) and overconfident on localization + analysis (ECE 0.35–0.49).
+
+**Next, Shahesta:** review PR #6 (results only), plus the PR #5 items below.
+
+**Next, Nour:** the RQ1 write-up for Paper 1: per-task accuracy with Wilson intervals and the
+always-"Yes" baseline, the cost results, and the per-task calibration figures from PR #6, with
+finding 3 (localization overconfidence) as a stated limitation.
+
 ### 19 Oct 2026, Nour
 
 **Done** (PR #5, branch `eval/rq3-protocol-lock`, draft):
@@ -234,7 +247,7 @@ what next.
 | Track | What is left | Who |
 |---|---|---|
 | RQ3 live benchmark | lock the protocol (above) → pilot: seeds 101–102 for both agents → check the disagreement rate → seeds 103–106 → `score analyze` | Both; Nour scores |
-| RQ1 | calibration/evidence-failure on the final file; write-up with per-task accuracy | Nour |
+| RQ1 | write-up with per-task accuracy and the per-task calibration results (evaluation done: PR #6) | Nour |
 | Paper 1 | everything after the introduction: RQ1, RQ2, RQ3 results and discussion | Both |
 | Paper 2 (Upgrade Paradox) | Experiment 2 and a second model family; note the 8B → 14B gap alone is inside the intervals | Shahesta |
 | Mentor-scale test bed | days 1–3 done locally (k3d); move to AWS Stockholm Spot | Shahesta |
