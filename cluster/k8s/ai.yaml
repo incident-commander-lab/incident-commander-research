@@ -1,0 +1,74 @@
+# The GPU node's workloads (AWS only): two Ollama servers sharing the L4 by time-slicing.
+# Time-slicing does not isolate GPU memory (spec section 12), so the AGENT's server starts first and
+# keeps qwen3:8b loaded (the exact RQ1/RQ3 model); the CHAT server only starts once that model is
+# resident, so it sizes itself to the memory that is left and offloads to CPU instead of taking the
+# agent's. Same Ollama version as RQ1 (0.35.0).
+apiVersion: v1
+kind: Namespace
+metadata: { name: ai }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: ollama-agent, namespace: ai }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: ollama-agent } }
+  template:
+    metadata: { labels: { app: ollama-agent } }
+    spec:
+      nodeSelector: { role: gpu }
+      runtimeClassName: nvidia
+      containers:
+        - name: ollama
+          image: ollama/ollama:0.35.0
+          command: ["sh", "-c", "ollama serve & sleep 5 && ollama pull qwen3:8b && ollama run qwen3:8b 'ready' >/dev/null && echo MODEL_READY && wait"]
+          env:
+            - { name: OLLAMA_KEEP_ALIVE, value: "-1" }
+            - { name: OLLAMA_NUM_PARALLEL, value: "1" }
+            - { name: OLLAMA_CONTEXT_LENGTH, value: "16384" }
+          ports: [{ containerPort: 11434 }]
+          resources: { limits: { nvidia.com/gpu: 1 } }
+          readinessProbe:   # ready only when the agent's model is loaded on the GPU
+            exec: { command: ["sh", "-c", "ollama ps | grep -q qwen3:8b"] }
+            periodSeconds: 10
+          volumeMounts: [{ name: models, mountPath: /root/.ollama }]
+      volumes: [{ name: models, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: ollama-agent, namespace: ai }
+spec: { selector: { app: ollama-agent }, ports: [{ port: 11434, targetPort: 11434 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: ollama-chat, namespace: ai }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: ollama-chat } }
+  template:
+    metadata: { labels: { app: ollama-chat } }
+    spec:
+      nodeSelector: { role: gpu }
+      runtimeClassName: nvidia
+      initContainers:
+        - name: wait-for-agent-model
+          image: curlimages/curl:8.11.1
+          command: ["sh", "-c", "until curl -sf http://ollama-agent.ai.svc:11434/api/ps | grep -q qwen3:8b; do sleep 10; done"]
+      containers:
+        - name: ollama
+          image: ollama/ollama:0.35.0
+          command: ["sh", "-c", "ollama serve & sleep 5 && ollama pull qwen3:4b-q4_K_M && echo MODEL_READY && wait"]
+          env:
+            - { name: OLLAMA_KEEP_ALIVE, value: "30m" }
+            - { name: OLLAMA_NUM_PARALLEL, value: "4" }
+          ports: [{ containerPort: 11434 }]
+          resources: { limits: { nvidia.com/gpu: 1 } }
+          volumeMounts: [{ name: models, mountPath: /root/.ollama }]
+      volumes: [{ name: models, emptyDir: {} }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: ollama-chat, namespace: ai }
+spec: { selector: { app: ollama-chat }, ports: [{ port: 11434, targetPort: 11434 }] }

@@ -1,0 +1,12 @@
+# nvdp/nvidia-device-plugin 0.20.1: advertise the L4 as 2 time-sliced nvidia.com/gpu (agent + chat Ollama)
+nodeSelector: { role: gpu }
+runtimeClassName: nvidia
+config:
+  map:
+    default: |-
+      version: v1
+      sharing:
+        timeSlicing:
+          resources:
+            - name: nvidia.com/gpu
+              replicas: 2

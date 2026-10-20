@@ -1,0 +1,6 @@
+# gpu-helm-charts/dcgm-exporter 4.8.4: GPU utilisation / memory / power / temperature for Prometheus
+nodeSelector: { role: gpu }
+runtimeClassName: nvidia
+serviceMonitor: { enabled: false }
+service:
+  annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9400" }
