@@ -286,16 +286,17 @@ print(f'removed {len(rows) - len(keep)} results matching $2; the next night comm
 PY"
   ;;
 record)
-  # record start|status|stop: continuous live recording for the RQ3 replay seeds, on this host
+  # record start|status|stop: continuous live recording for the RQ3 replay seeds, on this host.
+  # RECORD_STOP_UTC='2026-10-21 21:00' makes the host shut itself down (= stopped, disk kept) at that time.
   case "${2:-status}" in
     start)
       credit_guard; ensure_running
       say "Copying the recorder to the machine"
       git -C "$REPO" archive "$BRANCH" testbed/app/src testbed/app/package.json testbed/app/package-lock.json \
-        testbed/app/Dockerfile infra/record/docker-compose.yml | gzip -9 | base64 | tr -d '\n' > "$TMP/rec.b64"
+        testbed/app/Dockerfile infra/record | gzip -9 | base64 | tr -d '\n' > "$TMP/rec.b64"
       split -b 2500 "$TMP/rec.b64" "$TMP/rchunk_"
       n=0; for c in "$TMP"/rchunk_*; do n=$((n+1)); { [ $n = 1 ] && echo 'rm -f ~/rec.b64'; echo "printf %s '$(cat "$c")' >> ~/rec.b64"; } > "$TMP/s.sh"; onhost 60 "$TMP/s.sh" >/dev/null; done
-      host 600 'mkdir -p ~/pulse-record && cd ~/pulse-record && base64 -d ~/rec.b64 | tar xzf - && mv -f infra/record/docker-compose.yml . && mkdir -p recordings && docker compose up -d --build 2>&1 | tail -2 && sleep 20 && docker compose logs collector --since 1m | grep -m1 -E "connected|error"'
+      host 600 'mkdir -p ~/pulse-record && cd ~/pulse-record && base64 -d ~/rec.b64 | tar xzf - && mv -f infra/record/* . && chmod +x compress_last_hour.sh && mkdir -p recordings && (crontab -l 2>/dev/null | grep -v -e compress_last_hour -e check_last_hour; echo "5 * * * * $HOME/pulse-record/compress_last_hour.sh"; echo "35 * * * * nice -n 10 python3 $HOME/pulse-record/check_last_hour.py") | crontab - && { [ -n "'"${RECORD_STOP_UTC:-}"'" ] && sudo shutdown -h +$(( ( $(date -u -d "'"${RECORD_STOP_UTC:-}"'" +%s) - $(date -u +%s) ) / 60 )) "recording window complete" || true; } && docker compose up -d --build 2>&1 | tail -2 && sleep 20 && docker compose logs collector --since 1m | grep -m1 -E "connected|error"'
       echo "Recording. Check: ~/ic-bench.sh record status   (keep the machine running; ~\$0.27/h)"
       ;;
     status)
