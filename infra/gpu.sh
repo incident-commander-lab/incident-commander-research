@@ -51,18 +51,22 @@ up)
   python3 -c "import sys; sys.exit(0 if $COST <= $CAP else 1)" || { echo "STOP: above the \$$CAP session cap"; exit 1; }
   guard "$COST"
   SG=$(aws_ ec2 describe-security-groups --filters Name=group-name,Values=default --query 'SecurityGroups[0].GroupId' --output text)
-  for AZ in eu-north-1a eu-north-1b; do
+  # Spot GPU capacity varies: try the planned L4 first, then A10G, then T4, in each zone that offers it
+  for TRY in g6.xlarge:eu-north-1a g6.xlarge:eu-north-1b g5.xlarge:eu-north-1b g5.xlarge:eu-north-1c \
+             g4dn.xlarge:eu-north-1a g4dn.xlarge:eu-north-1b g4dn.xlarge:eu-north-1c; do
+    GPU=${TRY%%:*}; AZ=${TRY#*:}
     SUB=$(aws_ ec2 describe-subnets --filters Name=default-for-az,Values=true Name=availability-zone,Values=$AZ --query 'Subnets[0].SubnetId' --output text)
-    NAME="ic-gpu-$(date +%m%d-%H%M)"
-    say "Creating $NAME in $AZ (Spot; self-terminates after $H h)"
+    NAME="ic-gpu-$(date +%m%d-%H%M%S)"
+    say "Creating $NAME: $GPU in $AZ (Spot; self-terminates after $H h)"
     aws_ cloudformation create-stack --stack-name "$NAME" --template-body "file://$REPO/infra/gpu-stack.yaml" \
       --capabilities CAPABILITY_NAMED_IAM --tags Key=project,Value=incident-commander-gpu \
       --parameters ParameterKey=SessionHours,ParameterValue="$H" ParameterKey=K3sToken,ParameterValue="$(openssl rand -hex 24)" \
-                   ParameterKey=SubnetId,ParameterValue="$SUB" ParameterKey=SecurityGroupId,ParameterValue="$SG" >/dev/null
+                   ParameterKey=SubnetId,ParameterValue="$SUB" ParameterKey=SecurityGroupId,ParameterValue="$SG" \
+                   ParameterKey=GpuInstanceType,ParameterValue="$GPU" >/dev/null
     if aws_ cloudformation wait stack-create-complete --stack-name "$NAME" 2>/dev/null; then
-      echo "created. Next: infra/gpu.sh deploy"; exit 0
+      echo "created with $GPU in $AZ. Next: infra/gpu.sh deploy"; exit 0
     fi
-    echo "failed in $AZ: $(aws_ cloudformation describe-stack-events --stack-name "$NAME" --query "StackEvents[?ResourceStatus=='CREATE_FAILED'].ResourceStatusReason|[0]" --output text)"
+    echo "failed: $(aws_ cloudformation describe-stack-events --stack-name "$NAME" --query "StackEvents[?ResourceStatus=='CREATE_FAILED' && !contains(ResourceStatusReason,'cancelled')].ResourceStatusReason|[0]" --output text | cut -c1-160)"
     aws_ cloudformation delete-stack --stack-name "$NAME"; aws_ cloudformation wait stack-delete-complete --stack-name "$NAME" || true
   done
   exit 1

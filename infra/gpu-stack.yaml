@@ -28,6 +28,11 @@ Parameters:
   SecurityGroupId:
     Type: AWS::EC2::SecurityGroup::Id
     Description: The default VPC security group (inbound only from itself, outbound to the internet).
+  GpuInstanceType:
+    Type: String
+    Default: g6.xlarge
+    AllowedValues: [g6.xlarge, g5.xlarge, g4dn.xlarge]
+    Description: GPU machine (Spot capacity varies; gpu.sh tries g6, then g5, then g4dn).
   GpuAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id
@@ -123,7 +128,7 @@ Resources:
     Type: AWS::EC2::Instance
     Properties:
       LaunchTemplate: { LaunchTemplateId: !Ref Template, Version: !GetAtt Template.LatestVersionNumber }
-      InstanceType: g6.xlarge
+      InstanceType: !Ref GpuInstanceType
       ImageId: !Ref GpuAmi
       SubnetId: !Ref SubnetId
       BlockDeviceMappings: [{ DeviceName: /dev/sda1, Ebs: { VolumeSize: 100, VolumeType: gp3, DeleteOnTermination: true } }]
@@ -146,3 +151,4 @@ Outputs:
   AppsId: { Value: !Ref Apps }
   GpuId: { Value: !Ref Gpu }
   OpsIp: { Value: !GetAtt Ops.PrivateIp }
+  GpuType: { Value: !Ref GpuInstanceType }
