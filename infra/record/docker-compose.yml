@@ -1,0 +1,24 @@
+# Continuous recording of the live Wikimedia stream for the RQ3 replay seeds (RQ3_PROTOCOL.md,
+# "Seeds"; testbed_ops.recordings picks the windows). Only what recording needs: the collector
+# writes every event to recordings/wikipedia-YYYYMMDDHH.ndjson before anything else, and its Redis
+# stream trims itself (MAXLEN). Runs on the bench host: ~/ic-bench.sh record start|status|stop
+name: pulse-record
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, retries: 10 }
+    restart: unless-stopped
+  collector:
+    build: ./testbed/app
+    environment:
+      ROLE: collector
+      SERVICE_NAME: collector
+      METRICS_PORT: "9101"
+      REDIS_URL: redis://redis:6379
+      RECORD_DIR: /recordings
+      USER_AGENT: "pulse-testbed/0.1 (research test bed; https://github.com/incident-commander-lab)"
+    volumes: ["./recordings:/recordings"]
+    user: root
+    depends_on: { redis: { condition: service_healthy } }
+    restart: unless-stopped

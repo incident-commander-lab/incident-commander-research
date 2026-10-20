@@ -13,6 +13,7 @@
 #   ~/ic-bench.sh redo <text>  forget results whose problem name contains <text>, so the next night re-runs them
 #   ~/ic-bench.sh fetch     copy results to the laptop
 #   ~/ic-bench.sh credits   AWS credits used / left (nights refuse to start below $15 left)
+#   ~/ic-bench.sh record start|status|stop   continuous live recording for the RQ3 replay seeds
 #   ~/ic-bench.sh hostrun <s> <script>  run a bash script on the machine (starts it if stopped)
 #   ~/ic-bench.sh table     results table (after fetch)
 #   ~/ic-bench.sh pause     stop tunnel/model/keep-awake and stop the AWS machine (disk kept)
@@ -283,6 +284,27 @@ os.rename(p, p + '.before-redo')
 open(p, 'w').writelines(json.dumps(r) + '\\n' for r in keep)
 print(f'removed {len(rows) - len(keep)} results matching $2; the next night command re-runs them')
 PY"
+  ;;
+record)
+  # record start|status|stop: continuous live recording for the RQ3 replay seeds, on this host
+  case "${2:-status}" in
+    start)
+      credit_guard; ensure_running
+      say "Copying the recorder to the machine"
+      git -C "$REPO" archive "$BRANCH" testbed/app/src testbed/app/package.json testbed/app/package-lock.json \
+        testbed/app/Dockerfile infra/record/docker-compose.yml | gzip -9 | base64 | tr -d '\n' > "$TMP/rec.b64"
+      split -b 2500 "$TMP/rec.b64" "$TMP/rchunk_"
+      n=0; for c in "$TMP"/rchunk_*; do n=$((n+1)); { [ $n = 1 ] && echo 'rm -f ~/rec.b64'; echo "printf %s '$(cat "$c")' >> ~/rec.b64"; } > "$TMP/s.sh"; onhost 60 "$TMP/s.sh" >/dev/null; done
+      host 600 'mkdir -p ~/pulse-record && cd ~/pulse-record && base64 -d ~/rec.b64 | tar xzf - && mv -f infra/record/docker-compose.yml . && mkdir -p recordings && docker compose up -d --build 2>&1 | tail -2 && sleep 20 && docker compose logs collector --since 1m | grep -m1 -E "connected|error"'
+      echo "Recording. Check: ~/ic-bench.sh record status   (keep the machine running; ~\$0.27/h)"
+      ;;
+    status)
+      host 120 'cd ~/pulse-record 2>/dev/null || { echo "not set up"; exit 0; }; docker compose ps --format "{{.Service}} {{.State}} {{.Status}}"; echo; ls -l --time-style=+%H:%M recordings | awk "NR>1 {printf \"%s  %6.1f MB  last write %s\n\", \$7, \$5/1e6, \$6}"; echo; docker compose logs collector --since 10m | grep -c "source disconnected" | xargs echo "disconnects in the last 10 min:"'
+      ;;
+    stop)
+      host 120 'cd ~/pulse-record && docker compose down && echo "recorder stopped; files kept in ~/pulse-record/recordings"'
+      ;;
+  esac
   ;;
 hostrun)
   # hostrun <timeout-seconds> <local script>: run a bash script on the machine as ubuntu (starts it if stopped)
