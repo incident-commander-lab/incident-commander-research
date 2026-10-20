@@ -30,6 +30,10 @@ KUBECTL = os.environ.get("KUBECTL", "kubectl")
 NAMESPACE = {"juice-shop": "shop", "assistant": "shop"}
 INGRESS = {"juice-shop": "shop-juice-shop-3000@kubernetes", "assistant": "shop-assistant-8000@kubernetes"}
 USES_GPU = {"assistant"}
+# "slow" thresholds per service: shop pages should answer in well under a second; the assistant is an
+# LLM endpoint whose NORMAL answers take seconds (4-14 s on a laptop in the 20 Oct shakedown), so a
+# shared 2 s threshold read it as permanently slow and failed a correct fix's verification.
+SLOW_S = {"juice-shop": 2.0, "assistant": 20.0}
 
 
 def _sh(cmd: str, timeout: int = 30) -> str:
@@ -79,14 +83,17 @@ def _read_mem(s):
     return json.dumps({"memory_vs_limit": v, "oom_restarts_15m": oom})
 
 
+# Latency and errors use 1-minute windows: verification reads them VERIFY_SECONDS (120 s) after a fix,
+# and a 2-minute window would still contain the errors from before the fix (cluster shakedown, 20 Oct:
+# a correct rollback was judged "did not hold" and reverted).
 def _read_latency(s):
-    v = prom(f'histogram_quantile(0.95, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{{service="{INGRESS[s]}"}}[2m])))')
+    v = prom(f'histogram_quantile(0.95, sum by (le) (rate(traefik_service_request_duration_seconds_bucket{{service="{INGRESS[s]}"}}[1m])))')
     return json.dumps({"p95_s": v})
 
 
 def _read_errors(s):
-    tot = prom(f'sum(rate(traefik_service_requests_total{{service="{INGRESS[s]}"}}[2m]))')
-    err = prom(f'sum(rate(traefik_service_requests_total{{service="{INGRESS[s]}",code=~"5.."}}[2m]))')
+    tot = prom(f'sum(rate(traefik_service_requests_total{{service="{INGRESS[s]}"}}[1m]))')
+    err = prom(f'sum(rate(traefik_service_requests_total{{service="{INGRESS[s]}",code=~"5.."}}[1m]))')
     return json.dumps({"rps": tot, "err_rps": err or 0.0})
 
 
@@ -129,9 +136,9 @@ def _lbl_mem(out, _s):
     return None if v is None else ("near_limit" if v >= 0.85 else "ok")
 
 
-def _lbl_latency(out, _s):
+def _lbl_latency(out, s):
     v = _num(out, "p95_s")
-    return "ok" if v is None or v != v else ("slow" if v > 2.0 else "ok")   # no traffic: nothing slow
+    return "ok" if v is None or v != v else ("slow" if v > SLOW_S.get(s, 2.0) else "ok")   # no traffic: nothing slow
 
 
 def _lbl_errors(out, _s):
@@ -170,9 +177,9 @@ _METRIC = {
                               "CPU use against the pod's CPU limit, peak of the last 3 minutes (saturated >= 90%)", _read_cpu, _lbl_cpu),
     "memory_pressure": _metric("memory_pressure", ("oom_killed", "near_limit", "ok"),
                                "Memory against the pod's limit, and OOM kills in the last 15 minutes", _read_mem, _lbl_mem),
-    "latency": _metric("latency", ("slow", "ok"), "p95 response time users see at the ingress (slow > 2 s)",
+    "latency": _metric("latency", ("slow", "ok"), "p95 response time users see at the ingress over the last minute (slow: > 2 s for juice-shop, > 20 s for the assistant)",
                        _read_latency, _lbl_latency),
-    "error_rate": _metric("error_rate", ("errors", "ok"), "Share of 5xx responses at the ingress (errors > 5%)",
+    "error_rate": _metric("error_rate", ("errors", "ok"), "Share of 5xx responses at the ingress over the last minute (errors > 5%)",
                           _read_errors, _lbl_errors),
     "recent_change": _metric("recent_change", ("changed", "unchanged"),
                              "A new release (rollout) of this Deployment in the last 30 minutes", _read_change, _lbl_change, eps=0.02),

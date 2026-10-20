@@ -1,0 +1,259 @@
+{
+ "id": "20261020-201819-2d34",
+ "opened": "2026-10-20T20:18:19+00:00",
+ "platform": "k8s",
+ "autonomy": "act",
+ "agent_kind": "rule",
+ "rule_version": 2,
+ "alerts": [
+  {
+   "name": "ShopErrors",
+   "summary": "more than 5% errors from shop-assistant-8000@kubernetes",
+   "started": "2026-10-20T20:17:59.136Z"
+  }
+ ],
+ "act_threshold": 0.783,
+ "generation": {
+  "dropped": 0
+ },
+ "remedy_checks": [],
+ "remedy_success": {
+  "rollout_undo:assistant": 0.974,
+  "restart:assistant": 0.413,
+  "rate_limit:assistant": 0.1
+ },
+ "investigation": {
+  "hypotheses": {
+   "H1": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to a misconfigured dependency or a faulty integration with the language model.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.8,
+    "predictions": {
+     "error_rate:assistant": "errors",
+     "latency:assistant": "slow",
+     "queue_depth:assistant": "backlog",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H2": {
+    "service": "assistant",
+    "claim": "The assistant service is overwhelmed with requests, leading to high latency and error rates due to a queue backlog.",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "latency:assistant": "slow",
+     "error_rate:assistant": "errors",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H3": {
+    "service": "assistant",
+    "claim": "The assistant service is encountering GPU memory issues, leading to high latency and errors.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "gpu_memory:assistant": "full",
+     "latency:assistant": "slow",
+     "error_rate:assistant": "errors",
+     "queue_depth:assistant": "backlog",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "H4": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high GPU utilization, leading to performance degradation and errors.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "gpu_util:assistant": "saturated",
+     "latency:assistant": "slow",
+     "error_rate:assistant": "errors",
+     "queue_depth:assistant": "backlog",
+     "gpu_memory:assistant": "ok"
+    }
+   },
+   "H5": {
+    "service": "assistant",
+    "claim": "The assistant service is encountering a recent change that introduced a bug or misconfiguration, leading to errors.",
+    "remedy": "rollout_undo:assistant",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "recent_change:assistant": "changed",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "slow",
+     "queue_depth:assistant": "backlog",
+     "gpu_memory:assistant": "ok"
+    }
+   },
+   "H6": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing a probe failure due to an unhealthy pod or misconfigured health checks, leading to errors.",
+    "remedy": "restart:assistant",
+    "catch_all": false,
+    "prior": 0.5,
+    "predictions": {
+     "event_reason:assistant": "probe_failure",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "slow",
+     "queue_depth:assistant": "backlog",
+     "gpu_memory:assistant": "ok"
+    }
+   },
+   "H0": {
+    "service": null,
+    "claim": "No fault: every service is healthy",
+    "remedy": null,
+    "catch_all": false,
+    "prior": 0.1,
+    "predictions": {
+     "pod_health:juice-shop": "healthy",
+     "deployment_ready:juice-shop": "ready",
+     "endpoints:juice-shop": "has_endpoints",
+     "service_ports:juice-shop": "ports_ok",
+     "event_reason:juice-shop": "none",
+     "log_signature:juice-shop": "clean",
+     "cpu_saturation:juice-shop": "ok",
+     "memory_pressure:juice-shop": "ok",
+     "latency:juice-shop": "ok",
+     "error_rate:juice-shop": "ok",
+     "recent_change:juice-shop": "unchanged",
+     "pod_health:assistant": "healthy",
+     "deployment_ready:assistant": "ready",
+     "endpoints:assistant": "has_endpoints",
+     "service_ports:assistant": "ports_ok",
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "clean",
+     "cpu_saturation:assistant": "ok",
+     "memory_pressure:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok",
+     "recent_change:assistant": "unchanged",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "U1": {
+    "service": "juice-shop",
+    "claim": "some other fault in juice-shop",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   },
+   "U2": {
+    "service": "assistant",
+    "claim": "some other fault in assistant",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   }
+  },
+  "steps": [
+   {
+    "probe": "pod_health:juice-shop",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "juice-shop-c9647d7dd-2gzs8   1/1   Running   0     101s"
+   },
+   {
+    "probe": "pod_health:assistant",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "assistant-58c4497b8d-8w7xd   1/1   Running   0     101s"
+   },
+   {
+    "probe": "latency:assistant",
+    "outcome": "slow",
+    "free": false,
+    "raw": "{\"p95_s\": 5.0}"
+   },
+   {
+    "probe": "event_reason:assistant",
+    "outcome": "probe_failure",
+    "free": false,
+    "raw": "25s   Warning   Unhealthy   pod/assistant-659fdc65d8-n7bpr   Readiness probe failed: Get \"http://10.42.0.13:8000/assistant/healthz\": dial tcp 10.42.0.13:8000: connect: connection refused"
+   },
+   {
+    "probe": "recent_change:assistant",
+    "outcome": "changed",
+    "free": false,
+    "raw": "{\"revisions\": [[7, \"2026-10-20T20:19:08Z\"], [6, \"2026-10-20T20:16:38Z\"], [5, \"2026-10-20T20:05:58Z\"]], \"now\": \"2026-10-20T20:20:07Z\"}"
+   }
+  ],
+  "unavailable": [
+   "gpu_util:assistant",
+   "gpu_memory:assistant"
+  ],
+  "posteriors": {
+   "H1": 0.10703756791996671,
+   "H2": 0.09965566668410693,
+   "H3": 0.09227376544824716,
+   "H4": 0.09965566668410693,
+   "H5": 0.162770922250708,
+   "H6": 0.4125744600722028,
+   "U1": 1.2432675765658567e-05,
+   "U2": 0.025901407845122015,
+   "H0": 0.00011811041977375637
+  },
+  "p_fault": 0.9998818895802263,
+  "service_marginals": {
+   "assistant": 0.9998694569044606,
+   "juice-shop": 1.2432675765658567e-05
+  },
+  "stop_reason": "no_probe_worth_its_cost",
+  "checks_paid": 5
+ },
+ "diagnosis": {
+  "service": "assistant",
+  "hypothesis": "The assistant service is experiencing a probe failure due to an unhealthy pod or misconfigured health checks, leading to errors.",
+  "remedy": "rollout_undo:assistant",
+  "p_remedy": 0.974,
+  "decision": "act"
+ },
+ "policy": {
+  "allow": true,
+  "reasons": []
+ },
+ "action": {
+  "remedy": "rollout_undo:assistant",
+  "at": "2026-10-20T20:20:09+00:00",
+  "reverted": "2026-10-20T20:22:28+00:00"
+ },
+ "verification": {
+  "recovered": false,
+  "readings": {
+   "pod_health:assistant": "healthy",
+   "error_rate:assistant": "ok",
+   "latency:assistant": "slow",
+   "gpu_memory:assistant": null
+  }
+ },
+ "messages": [
+  {
+   "ts": "2026-10-20T20:22:28+00:00",
+   "text": "FIX DID NOT HOLD [20261020-201819-2d34] rollout_undo:assistant reverted - escalating. Readings: {'pod_health:assistant': 'healthy', 'error_rate:assistant': 'ok', 'latency:assistant': 'slow', 'gpu_memory:assistant': None}"
+  }
+ ],
+ "llm_usage": {
+  "calls": 1,
+  "input_tokens": 1377,
+  "output_tokens": 924,
+  "contract_failures": 0,
+  "retries": 0,
+  "answered_by": [
+   "qwen3:8b"
+  ]
+ },
+ "seconds": 249.1
+}

@@ -21,10 +21,15 @@ serverFiles:
       - name: shop
         rules:
           - alert: ShopSlow
-            expr: histogram_quantile(0.95, sum by (le, service) (rate(traefik_service_request_duration_seconds_bucket{service=~"shop-.*"}[2m]))) > 3
+            expr: histogram_quantile(0.95, sum by (le, service) (rate(traefik_service_request_duration_seconds_bucket{service=~"shop-juice-shop.*"}[2m]))) > 3
             for: 2m
             labels: { severity: page }
-            annotations: { summary: "p95 latency of {{ $labels.service }} above 3 s" }
+            annotations: { summary: "p95 latency of the shop above 3 s" }
+          - alert: AssistantSlow     # an LLM endpoint: normal answers take seconds
+            expr: histogram_quantile(0.95, sum by (le, service) (rate(traefik_service_request_duration_seconds_bucket{service=~"shop-assistant.*"}[2m]))) > 30
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "p95 answer time of the AI assistant above 30 s" }
           - alert: ShopErrors
             expr: sum by (service) (rate(traefik_service_requests_total{service=~"shop-.*",code=~"5.."}[2m])) / sum by (service) (rate(traefik_service_requests_total{service=~"shop-.*"}[2m])) > 0.05
             for: 2m

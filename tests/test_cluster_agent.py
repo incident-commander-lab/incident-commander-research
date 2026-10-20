@@ -47,6 +47,8 @@ def test_metric_labels():
     assert P._lbl_mem(json.dumps({"memory_vs_limit": 0.5, "oom_restarts_15m": 1}), "x") == "oom_killed"
     assert P._lbl_mem(json.dumps({"memory_vs_limit": 0.9, "oom_restarts_15m": None}), "x") == "near_limit"
     assert P._lbl_latency(json.dumps({"p95_s": None}), "x") == "ok"                     # no traffic, nothing slow
+    assert P._lbl_latency(json.dumps({"p95_s": 6.0}), "assistant") == "ok"               # an LLM answer takes seconds
+    assert P._lbl_latency(json.dumps({"p95_s": 6.0}), "juice-shop") == "slow"
     assert P._lbl_errors(json.dumps({"rps": 10, "err_rps": 1}), "x") == "errors"
     now = "2026-10-18T10:00:00Z"
     assert P._lbl_change(json.dumps({"revisions": [[2, "2026-10-18T09:50:00Z"]], "now": now}), "x") == "changed"

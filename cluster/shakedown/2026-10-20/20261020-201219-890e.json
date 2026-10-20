@@ -1,0 +1,278 @@
+{
+ "id": "20261020-201219-890e",
+ "opened": "2026-10-20T20:12:19+00:00",
+ "platform": "k8s",
+ "autonomy": "act",
+ "agent_kind": "rule",
+ "rule_version": 2,
+ "alerts": [
+  {
+   "name": "ShopErrors",
+   "summary": "more than 5% errors from shop-assistant-8000@kubernetes",
+   "started": "2026-10-20T20:11:59.136Z"
+  }
+ ],
+ "act_threshold": 0.783,
+ "generation": {
+  "dropped": 0
+ },
+ "remedy_checks": [],
+ "remedy_success": {
+  "rollout_undo:assistant": 0.951,
+  "rate_limit:assistant": 0.009,
+  "scale_out:juice-shop": 0.002
+ },
+ "investigation": {
+  "hypotheses": {
+   "H1": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to a misconfigured dependency or a failed language model connection.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.8,
+    "predictions": {
+     "error_rate:assistant": "errors",
+     "latency:assistant": "slow",
+     "log_signature:assistant": "connection_errors",
+     "event_reason:assistant": "none"
+    }
+   },
+   "H2": {
+    "service": "assistant",
+    "claim": "The assistant service is overwhelmed with requests, leading to high latency and error rates.",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "latency:assistant": "slow",
+     "error_rate:assistant": "errors",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H3": {
+    "service": "assistant",
+    "claim": "The assistant service is encountering GPU memory issues, causing performance degradation and errors.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "gpu_memory:assistant": "full",
+     "latency:assistant": "slow",
+     "error_rate:assistant": "errors",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H4": {
+    "service": "juice-shop",
+    "claim": "The juice-shop service is experiencing high latency due to CPU saturation, affecting the overall shop performance.",
+    "remedy": "scale_out:juice-shop",
+    "catch_all": false,
+    "prior": 0.5,
+    "predictions": {
+     "cpu_saturation:juice-shop": "saturated",
+     "latency:juice-shop": "slow",
+     "error_rate:juice-shop": "ok",
+     "pod_health:juice-shop": "healthy"
+    }
+   },
+   "H5": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing a recent change that introduced a bug or misconfiguration, leading to errors.",
+    "remedy": "rollout_undo:assistant",
+    "catch_all": false,
+    "prior": 0.5,
+    "predictions": {
+     "recent_change:assistant": "changed",
+     "error_rate:assistant": "errors",
+     "log_signature:assistant": "config_errors",
+     "event_reason:assistant": "none"
+    }
+   },
+   "H6": {
+    "service": "assistant",
+    "claim": "The assistant service is encountering memory pressure due to high usage, leading to performance issues and errors.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.4,
+    "predictions": {
+     "memory_pressure:assistant": "near_limit",
+     "latency:assistant": "slow",
+     "error_rate:assistant": "errors",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H0": {
+    "service": null,
+    "claim": "No fault: every service is healthy",
+    "remedy": null,
+    "catch_all": false,
+    "prior": 0.1,
+    "predictions": {
+     "pod_health:juice-shop": "healthy",
+     "deployment_ready:juice-shop": "ready",
+     "endpoints:juice-shop": "has_endpoints",
+     "service_ports:juice-shop": "ports_ok",
+     "event_reason:juice-shop": "none",
+     "log_signature:juice-shop": "clean",
+     "cpu_saturation:juice-shop": "ok",
+     "memory_pressure:juice-shop": "ok",
+     "latency:juice-shop": "ok",
+     "error_rate:juice-shop": "ok",
+     "recent_change:juice-shop": "unchanged",
+     "pod_health:assistant": "healthy",
+     "deployment_ready:assistant": "ready",
+     "endpoints:assistant": "has_endpoints",
+     "service_ports:assistant": "ports_ok",
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "clean",
+     "cpu_saturation:assistant": "ok",
+     "memory_pressure:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok",
+     "recent_change:assistant": "unchanged",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "U1": {
+    "service": "juice-shop",
+    "claim": "some other fault in juice-shop",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   },
+   "U2": {
+    "service": "assistant",
+    "claim": "some other fault in assistant",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   }
+  },
+  "steps": [
+   {
+    "probe": "pod_health:juice-shop",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "juice-shop-8c8bb97b8-25lxw   1/1   Running   0     6m21s"
+   },
+   {
+    "probe": "pod_health:assistant",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "assistant-64f764b548-dfgp5   1/1   Running   0     2m58s"
+   },
+   {
+    "probe": "error_rate:assistant",
+    "outcome": "errors",
+    "free": false,
+    "raw": "{\"rps\": 0.41816661212319556, \"err_rps\": 0.41816661212319556}"
+   },
+   {
+    "probe": "event_reason:assistant",
+    "outcome": "none",
+    "free": false,
+    "raw": ""
+   },
+   {
+    "probe": "recent_change:assistant",
+    "outcome": "changed",
+    "free": false,
+    "raw": "{\"revisions\": [[2, \"2026-10-20T20:09:21Z\"], [1, \"2026-10-20T20:05:58Z\"]], \"now\": \"2026-10-20T20:13:31Z\"}"
+   },
+   {
+    "probe": "log_signature:assistant",
+    "outcome": "clean",
+    "free": false,
+    "raw": "INFO:     Started server process [1]\nINFO:     Waiting for application startup.\nINFO:     Application startup complete.\nINFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)"
+   },
+   {
+    "probe": "memory_pressure:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"memory_vs_limit\": 0.1810760498046875, \"oom_restarts_15m\": null}"
+   },
+   {
+    "probe": "queue_depth:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"queue_avg_2m\": 0.0}"
+   },
+   {
+    "probe": "cpu_saturation:juice-shop",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"cpu_vs_limit_max_3m\": 0.44741681615266604}"
+   }
+  ],
+  "unavailable": [
+   "latency:assistant",
+   "gpu_util:assistant",
+   "gpu_memory:assistant"
+  ],
+  "posteriors": {
+   "H1": 0.38182461275014146,
+   "H2": 0.008806980600086205,
+   "H3": 0.028002490936234692,
+   "H4": 0.0020594952568744446,
+   "H5": 0.5274700011798943,
+   "H6": 0.005061154435763826,
+   "U1": 0.0020642356265454043,
+   "U2": 0.007451576155315156,
+   "H0": 0.03725945305914455
+  },
+  "p_fault": 0.9627405469408554,
+  "service_marginals": {
+   "assistant": 0.9586168160574357,
+   "juice-shop": 0.0041237308834198485
+  },
+  "stop_reason": "no_probe_worth_its_cost",
+  "checks_paid": 10
+ },
+ "diagnosis": {
+  "service": "assistant",
+  "hypothesis": "The assistant service is experiencing a recent change that introduced a bug or misconfiguration, leading to errors.",
+  "remedy": "rollout_undo:assistant",
+  "p_remedy": 0.951,
+  "decision": "act"
+ },
+ "policy": {
+  "allow": true,
+  "reasons": []
+ },
+ "action": {
+  "remedy": "rollout_undo:assistant",
+  "at": "2026-10-20T20:13:32+00:00",
+  "reverted": "2026-10-20T20:15:32+00:00"
+ },
+ "verification": {
+  "recovered": false,
+  "readings": {
+   "pod_health:assistant": "healthy",
+   "error_rate:assistant": "errors",
+   "latency:assistant": "slow",
+   "gpu_memory:assistant": null
+  }
+ },
+ "messages": [
+  {
+   "ts": "2026-10-20T20:15:32+00:00",
+   "text": "FIX DID NOT HOLD [20261020-201219-890e] rollout_undo:assistant reverted - escalating. Readings: {'pod_health:assistant': 'healthy', 'error_rate:assistant': 'errors', 'latency:assistant': 'slow', 'gpu_memory:assistant': None}"
+  }
+ ],
+ "llm_usage": {
+  "calls": 1,
+  "input_tokens": 1371,
+  "output_tokens": 832,
+  "contract_failures": 0,
+  "retries": 0,
+  "answered_by": [
+   "qwen3:8b"
+  ]
+ },
+ "seconds": 193.4
+}
