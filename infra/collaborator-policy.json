@@ -4,23 +4,55 @@
     {
       "Sid": "SeeTheMachines",
       "Effect": "Allow",
-      "Action": ["ec2:DescribeInstances", "ec2:DescribeInstanceStatus", "cloudformation:DescribeStacks", "ssm:DescribeSessions"],
+      "Action": [
+        "ec2:DescribeInstances",
+        "ec2:DescribeInstanceStatus",
+        "cloudformation:DescribeStacks",
+        "ssm:DescribeSessions",
+        "ssm:DescribeInstanceInformation",
+        "ssm:GetConnectionStatus",
+        "ssm:DescribeInstanceProperties"
+      ],
       "Resource": "*",
-      "Condition": {"StringEquals": {"aws:RequestedRegion": ["us-east-1", "eu-north-1"]}}
+      "Condition": {
+        "StringEquals": {
+          "aws:RequestedRegion": [
+            "us-east-1",
+            "eu-north-1"
+          ]
+        }
+      }
     },
     {
       "Sid": "StartStopOnlyOurMachines",
       "Effect": "Allow",
-      "Action": ["ec2:StartInstances", "ec2:StopInstances"],
+      "Action": [
+        "ec2:StartInstances",
+        "ec2:StopInstances"
+      ],
       "Resource": "arn:aws:ec2:*:ACCOUNT_ID:instance/*",
-      "Condition": {"StringEquals": {"aws:ResourceTag/project": ["incident-commander-bench", "incident-commander-gpu"]}}
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/project": [
+            "incident-commander-bench",
+            "incident-commander-gpu"
+          ]
+        }
+      }
     },
     {
       "Sid": "ShellIntoOurMachinesOnly",
       "Effect": "Allow",
       "Action": "ssm:StartSession",
       "Resource": "arn:aws:ec2:*:ACCOUNT_ID:instance/*",
-      "Condition": {"StringEquals": {"aws:ResourceTag/project": ["incident-commander-bench", "incident-commander-gpu"]}}
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/project": [
+            "incident-commander-bench",
+            "incident-commander-gpu"
+          ]
+        }
+      }
     },
     {
       "Sid": "SessionDocuments",
@@ -36,21 +68,38 @@
     {
       "Sid": "EndOwnSessions",
       "Effect": "Allow",
-      "Action": ["ssm:TerminateSession", "ssm:ResumeSession"],
+      "Action": [
+        "ssm:TerminateSession",
+        "ssm:ResumeSession"
+      ],
       "Resource": "arn:aws:ssm:*:ACCOUNT_ID:session/${aws:username}-*"
     },
     {
       "Sid": "ReadCostsAndCredits",
       "Effect": "Allow",
-      "Action": ["ce:GetCostAndUsage", "budgets:ViewBudget", "freetier:GetAccountPlanState"],
+      "Action": [
+        "ce:GetCostAndUsage",
+        "budgets:ViewBudget",
+        "freetier:GetAccountPlanState"
+      ],
       "Resource": "*"
     },
     {
       "Sid": "ManageOwnPasswordAndMFA",
       "Effect": "Allow",
-      "Action": ["iam:ChangePassword", "iam:GetUser", "iam:CreateVirtualMFADevice", "iam:EnableMFADevice",
-                 "iam:ListMFADevices", "iam:ResyncMFADevice", "iam:GetLoginProfile"],
-      "Resource": ["arn:aws:iam::ACCOUNT_ID:user/${aws:username}", "arn:aws:iam::ACCOUNT_ID:mfa/${aws:username}"]
+      "Action": [
+        "iam:ChangePassword",
+        "iam:GetUser",
+        "iam:CreateVirtualMFADevice",
+        "iam:EnableMFADevice",
+        "iam:ListMFADevices",
+        "iam:ResyncMFADevice",
+        "iam:GetLoginProfile"
+      ],
+      "Resource": [
+        "arn:aws:iam::ACCOUNT_ID:user/${aws:username}",
+        "arn:aws:iam::ACCOUNT_ID:mfa/${aws:username}"
+      ]
     }
   ]
 }
