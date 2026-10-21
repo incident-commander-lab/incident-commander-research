@@ -7,7 +7,7 @@
 #   infra/gpu.sh deploy       copy the code, build images on the ops machine, install everything
 #   infra/gpu.sh status       nodes, pods, GPU, time left, cost so far
 #   infra/gpu.sh ui           Grafana http://localhost:3401 and the shop http://localhost:3400 through Session Manager
-#   infra/gpu.sh run <script> run a bash script on the ops machine (kubectl/helm available there)
+#   infra/gpu.sh run <script> [s] run a bash script on the ops machine (kubectl/helm there; over 900 s: detached)
 #   infra/gpu.sh down         delete the stack now (machines terminate, disks deleted)
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,6 +27,24 @@ onhost() {   # onhost <timeout> <script file>: run as root on the ops machine vi
     | grep -v -e "^Starting session" -e "^Exiting session" -e '^\s*$' || true
 }
 host() { printf '%s\n' "$2" > "$TMP/s.sh"; onhost "$1" "$TMP/s.sh"; }
+
+detached() { # detached <max-seconds> <script file>: run on ops in the background and follow its log.
+  # Session Manager ends a session after 20 min without client input (output does not count), so a
+  # long script must not live inside one; each poll below is a short session of its own.
+  local T=$1 F=$2 N L
+  N="job-$(date +%s)"; L="/root/$N.log"
+  { echo "cat > /root/$N.sh <<'IC_JOB_EOF'"; cat "$F"; echo "IC_JOB_EOF"
+    echo "nohup bash -c 'bash /root/$N.sh; echo IC_JOB_EXIT $?' > $L 2>&1 < /dev/null & echo started $N"; } > "$TMP/d.sh"
+  onhost 60 "$TMP/d.sh"
+  local seen=0 end=$(( $(date +%s) + T ))
+  while [ "$(date +%s)" -lt "$end" ]; do
+    sleep 30
+    host 40 "tail -n +$((seen + 1)) $L" > "$TMP/new.txt" || true
+    [ -s "$TMP/new.txt" ] && { cat "$TMP/new.txt"; seen=$((seen + $(wc -l < "$TMP/new.txt"))); }
+    grep -q "^IC_JOB_EXIT" "$TMP/new.txt" && return 0
+  done
+  echo "(stopped following after ${T}s; the job keeps running: infra/gpu.sh run-log $N)"
+}
 
 CORE=${CORE:-ondemand}   # ops + apps: ondemand (default, survives the session) or spot (cheaper, can be reclaimed)
 hourly() {   # $/h of the three machines + disks: the dearest GPU fallback at its worst-AZ Spot price,
@@ -89,8 +107,6 @@ deploy)
   say "Building images and installing (about 10 minutes)"
   cat > "$TMP/deploy.sh" <<'DEPLOY'
 set -e
-# Session Manager drops a session after 20 min without output; the quiet builds and helm waits take longer
-( while sleep 240; do echo "  ... still installing ($(date -u +%H:%M) UTC)"; done ) & trap "kill $! 2>/dev/null" EXIT
 cd /root/ic; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 for img in "assistant cluster/assistant" "chaos cluster/chaos"; do set -- $img
   docker build -q -t localhost:5000/ic/$1:1.0.0 $2 >/dev/null && docker push -q localhost:5000/ic/$1:1.0.0 >/dev/null; done
@@ -121,7 +137,7 @@ for d in shop/juice-shop shop/assistant chaos/chaos agent/opa agent/ic-agent ai/
 echo DEPLOY_DONE
 kubectl get pods -A -o wide --no-headers | awk '$1 ~ /shop|ai|agent|chaos|monitoring/ {print $1, $2, $4, $8}'
 DEPLOY
-  onhost 3000 "$TMP/deploy.sh"
+  detached 3000 "$TMP/deploy.sh"
   ;;
 status)
   S=$(stack); [ -n "$S" ] || { echo "no session running (nothing is costing money)"; exit 0; }
@@ -135,9 +151,12 @@ ui)
   nohup aws --profile "$PROFILE" --region "$REGION" ssm start-session --target "$ID" --document-name AWS-StartPortForwardingSession --parameters portNumber=80,localPortNumber=3400 >/dev/null 2>&1 &
   sleep 5; echo "Grafana http://localhost:3401/d/ic-cluster  ·  shop http://localhost:3400"
   ;;
-run)
-  [ -f "${2:-}" ] || { echo "usage: infra/gpu.sh run <script>"; exit 1; }
-  onhost "${3:-900}" "$2"
+run)          # run <script> [max-seconds]: detached on ops, log followed here
+  [ -f "${2:-}" ] || { echo "usage: infra/gpu.sh run <script> [max-seconds]"; exit 1; }
+  if [ "${3:-900}" -le 900 ]; then onhost "${3:-900}" "$2"; else detached "$3" "$2"; fi
+  ;;
+run-log)      # run-log <job>: the whole log of a detached job
+  host 60 "cat /root/${2:?job name}.log"
   ;;
 down)
   S=$(stack); [ -n "$S" ] || { echo "nothing to delete"; exit 0; }
