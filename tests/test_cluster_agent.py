@@ -56,3 +56,16 @@ def test_metric_labels():
     assert P._lbl_change(json.dumps({"revisions": [[3, "2026-10-18T08:00:00Z"]], "now": now}), "x") == "unchanged"
     for name, t in P.TEMPLATES.items():   # the rule relies on the last outcome being the healthy one
         assert t.outcomes[-1] in ("healthy", "ready", "has_endpoints", "ports_ok", "none", "clean", "ok", "unchanged"), name
+
+
+def test_assistant_dead_model_address_reads_as_connection_errors():
+    # 21 Oct shakedown: a wrong model address fails fast and, before the assistant logged the reason,
+    # left only "503" access lines (log_signature=clean). Its own error line must read as the cause.
+    from ic.bench.probes import label_log_signature
+    src = open(os.path.join(ROOT, "cluster/assistant/app.py")).read()
+    assert 'log.error("upstream unreachable: %s: %s (%s)"' in src
+    line = ("2026-10-21 08:01:02,123 ERROR assistant: upstream unreachable: ConnectError: "
+            "[Errno -2] Name or service not known (http://model-gateway.ai.svc:11434/api/chat)")
+    access = 'INFO:     10.42.0.9:51234 - "POST /assistant/ask HTTP/1.1" 503 Service Unavailable'
+    assert label_log_signature("\n".join([line, access] * 10), "assistant") == "connection_errors"
+    assert label_log_signature("\n".join([access] * 20), "assistant") == "clean"

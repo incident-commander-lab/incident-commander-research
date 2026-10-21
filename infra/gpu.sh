@@ -3,6 +3,7 @@
 # Nothing heavy runs locally; every machine terminates itself after the session's hours.
 #
 #   infra/gpu.sh up [hours]   create the 3 machines (ops, apps, gpu) - refuses above $5 or below the credit floor
+#                             (CORE=spot infra/gpu.sh up: ops/apps on Spot too, cheaper but can be reclaimed)
 #   infra/gpu.sh deploy       copy the code, build images on the ops machine, install everything
 #   infra/gpu.sh status       nodes, pods, GPU, time left, cost so far
 #   infra/gpu.sh ui           Grafana http://localhost:3401 and the shop http://localhost:3400 through Session Manager
@@ -27,13 +28,17 @@ onhost() {   # onhost <timeout> <script file>: run as root on the ops machine vi
 }
 host() { printf '%s\n' "$2" > "$TMP/s.sh"; onhost "$1" "$TMP/s.sh"; }
 
-hourly() {   # live Spot price of the three machines + disks, in $/h (worst AZ price)
-  aws_ ec2 describe-spot-price-history --instance-types g6.xlarge m7i.xlarge t3.large --product-descriptions Linux/UNIX \
+CORE=${CORE:-ondemand}   # ops + apps: ondemand (default, survives the session) or spot (cheaper, can be reclaimed)
+hourly() {   # $/h of the three machines + disks: the dearest GPU fallback at its worst-AZ Spot price,
+             # ops + apps at Spot or the eu-north-1 on-demand list price (t3.large $0.0864, m7i.xlarge $0.2142, Oct 2026)
+  aws_ ec2 describe-spot-price-history --instance-types g6.xlarge g5.xlarge g4dn.xlarge m7i.xlarge t3.large --product-descriptions Linux/UNIX \
     --start-time "$(date -u +%FT%TZ)" --query 'SpotPriceHistory[].[InstanceType,SpotPrice]' --output text \
   | python3 -c 'import sys
 best={}
 for t,p in (l.split() for l in sys.stdin): best[t]=max(best.get(t,0),float(p))
-print(round(sum(best.values()) + 160*0.0836/730, 4))'
+gpu=max(best.get(t,0) for t in ("g6.xlarge","g5.xlarge","g4dn.xlarge"))
+core=best["t3.large"]+best["m7i.xlarge"] if sys.argv[1]=="spot" else 0.0864+0.2142
+print(round(gpu + core + 160*0.0836/730, 4))' "$CORE"
 }
 
 guard() {    # credits left (exact, Free Tier API) must stay above the floor after this session
@@ -57,12 +62,12 @@ up)
     GPU=${TRY%%:*}; AZ=${TRY#*:}
     SUB=$(aws_ ec2 describe-subnets --filters Name=default-for-az,Values=true Name=availability-zone,Values=$AZ --query 'Subnets[0].SubnetId' --output text)
     NAME="ic-gpu-$(date +%m%d-%H%M%S)"
-    say "Creating $NAME: $GPU in $AZ (Spot; self-terminates after $H h)"
+    say "Creating $NAME: $GPU in $AZ (GPU Spot, ops/apps $CORE; self-terminates after $H h)"
     aws_ cloudformation create-stack --stack-name "$NAME" --template-body "file://$REPO/infra/gpu-stack.yaml" \
       --capabilities CAPABILITY_NAMED_IAM --tags Key=project,Value=incident-commander-gpu \
       --parameters ParameterKey=SessionHours,ParameterValue="$H" ParameterKey=K3sToken,ParameterValue="$(openssl rand -hex 24)" \
                    ParameterKey=SubnetId,ParameterValue="$SUB" ParameterKey=SecurityGroupId,ParameterValue="$SG" \
-                   ParameterKey=GpuInstanceType,ParameterValue="$GPU" >/dev/null
+                   ParameterKey=GpuInstanceType,ParameterValue="$GPU" ParameterKey=CoreMarket,ParameterValue="$CORE" >/dev/null
     if aws_ cloudformation wait stack-create-complete --stack-name "$NAME" 2>/dev/null; then
       echo "created with $GPU in $AZ. Next: infra/gpu.sh deploy"; exit 0
     fi
