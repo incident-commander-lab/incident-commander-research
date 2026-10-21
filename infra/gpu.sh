@@ -17,10 +17,10 @@ say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
 stack() { aws_ cloudformation describe-stacks --query "Stacks[?starts_with(StackName,'ic-gpu-') && StackStatus!='DELETE_COMPLETE'].StackName|[0]" --output text 2>/dev/null | grep -v None || true; }
 out()   { aws_ cloudformation describe-stacks --stack-name "$(stack)" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue|[0]" --output text; }
 
-onhost() {   # onhost <timeout> <script file>: run as root on the ops machine via Session Manager
+onhost() {   # onhost <timeout> <script file>: run as root on the ops machine via Session Manager (it logs in as ssm-user)
   local T=$1 F=$2 ID B64 P
   ID=$(out OpsId); B64=$(base64 < "$F" | tr -d '\n')
-  P=$(python3 -c 'import json,sys; print(json.dumps({"command":["bash -c \"echo %s | base64 -d | bash\"" % sys.argv[1]]}))' "$B64")
+  P=$(python3 -c 'import json,sys; print(json.dumps({"command":["bash -c \"echo %s | base64 -d | sudo -i bash\"" % sys.argv[1]]}))' "$B64")
   perl -e 'alarm shift; exec @ARGV' "$T" aws --profile "$PROFILE" --region "$REGION" ssm start-session \
     --target "$ID" --document-name AWS-StartNonInteractiveCommand --parameters "$P" < <(sleep "$T") 2>&1 \
     | grep -v -e "^Starting session" -e "^Exiting session" -e '^\s*$' || true
@@ -84,6 +84,8 @@ deploy)
   say "Building images and installing (about 10 minutes)"
   cat > "$TMP/deploy.sh" <<'DEPLOY'
 set -e
+# Session Manager drops a session after 20 min without output; the quiet builds and helm waits take longer
+( while sleep 240; do echo "  ... still installing ($(date -u +%H:%M) UTC)"; done ) & trap "kill $! 2>/dev/null" EXIT
 cd /root/ic; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
 for img in "assistant cluster/assistant" "chaos cluster/chaos"; do set -- $img
   docker build -q -t localhost:5000/ic/$1:1.0.0 $2 >/dev/null && docker push -q localhost:5000/ic/$1:1.0.0 >/dev/null; done

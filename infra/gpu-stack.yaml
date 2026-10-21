@@ -142,9 +142,10 @@ Resources:
           mkdir -p /etc/rancher/k3s
           printf 'mirrors:\n  "registry.ic.local:5000":\n    endpoint: ["http://%s:5000"]\n' "${Ops.PrivateIp}" > /etc/rancher/k3s/registries.yaml
           until curl -sk https://${Ops.PrivateIp}:6443/ping >/dev/null; do sleep 10; done
-          # the DLAMI ships the NVIDIA driver and container toolkit; k3s detects the nvidia runtime at start
+          # the DLAMI ships the NVIDIA driver and container toolkit; k3s detects the nvidia runtime at start.
+          # gpu.present: the device-plugin chart only schedules on nodes with that label (no NFD here)
           curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.31.5+k3s1 K3S_URL=https://${Ops.PrivateIp}:6443 \
-            K3S_TOKEN='${K3sToken}' sh -s - agent --node-label role=gpu
+            K3S_TOKEN='${K3sToken}' sh -s - agent --node-label role=gpu --node-label nvidia.com/gpu.present=true
 
 Outputs:
   OpsId: { Value: !Ref Ops }
