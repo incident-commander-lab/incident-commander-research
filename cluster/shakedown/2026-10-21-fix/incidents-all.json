@@ -1,0 +1,1161 @@
+{
+ "id": "20261021-143709-0339",
+ "opened": "2026-10-21T14:37:09+00:00",
+ "platform": "k8s",
+ "autonomy": "act",
+ "agent_kind": "rule",
+ "rule_version": 2,
+ "alerts": [
+  {
+   "name": "AssistantBacklog",
+   "summary": "questions are queueing for the model",
+   "started": "2026-10-21T14:36:49.136Z"
+  }
+ ],
+ "act_threshold": 0.783,
+ "generation": {
+  "dropped": 0
+ },
+ "remedy_checks": [
+  "deployment_ready:assistant"
+ ],
+ "remedy_success": {
+  "scale_out:juice-shop": 0.046,
+  "rate_limit:assistant": 0.022,
+  "rollout_undo:assistant": 0.006
+ },
+ "investigation": {
+  "hypotheses": {
+   "H1": {
+    "service": "assistant",
+    "claim": "The assistant is experiencing model queueing due to GPU resource saturation",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.85,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "gpu_util:assistant": "saturated",
+     "gpu_memory:assistant": "full",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok"
+    }
+   },
+   "H2": {
+    "service": "assistant",
+    "claim": "The assistant is experiencing model queueing due to insufficient GPU memory",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.75,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "gpu_memory:assistant": "full",
+     "gpu_util:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok"
+    }
+   },
+   "H3": {
+    "service": "assistant",
+    "claim": "The assistant is experiencing model queueing due to an overloaded model",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "gpu_util:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok"
+    }
+   },
+   "H4": {
+    "service": "assistant",
+    "claim": "The assistant is experiencing model queueing due to a recent deployment change",
+    "remedy": "rollout_undo:assistant",
+    "catch_all": false,
+    "prior": 0.65,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "recent_change:assistant": "changed",
+     "deployment_ready:assistant": "ready",
+     "endpoints:assistant": "has_endpoints",
+     "pod_health:assistant": "healthy"
+    }
+   },
+   "H5": {
+    "service": "juice-shop",
+    "claim": "The juice-shop is causing excessive traffic to the assistant, leading to queueing",
+    "remedy": "scale_out:juice-shop",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "latency:juice-shop": "ok",
+     "error_rate:juice-shop": "ok",
+     "cpu_saturation:juice-shop": "ok",
+     "memory_pressure:juice-shop": "ok"
+    }
+   },
+   "H6": {
+    "service": "assistant",
+    "claim": "The assistant is experiencing model queueing due to a misconfigured GPU resource limit",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.55,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "gpu_memory:assistant": "full",
+     "gpu_util:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok"
+    }
+   },
+   "H0": {
+    "service": null,
+    "claim": "No fault: every service is healthy",
+    "remedy": null,
+    "catch_all": false,
+    "prior": 0.1,
+    "predictions": {
+     "pod_health:juice-shop": "healthy",
+     "deployment_ready:juice-shop": "ready",
+     "endpoints:juice-shop": "has_endpoints",
+     "service_ports:juice-shop": "ports_ok",
+     "event_reason:juice-shop": "none",
+     "log_signature:juice-shop": "clean",
+     "cpu_saturation:juice-shop": "ok",
+     "memory_pressure:juice-shop": "ok",
+     "latency:juice-shop": "ok",
+     "error_rate:juice-shop": "ok",
+     "recent_change:juice-shop": "unchanged",
+     "pod_health:assistant": "healthy",
+     "deployment_ready:assistant": "ready",
+     "endpoints:assistant": "has_endpoints",
+     "service_ports:assistant": "ports_ok",
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "clean",
+     "cpu_saturation:assistant": "ok",
+     "memory_pressure:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok",
+     "recent_change:assistant": "unchanged",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "U1": {
+    "service": "juice-shop",
+    "claim": "some other fault in juice-shop",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   },
+   "U2": {
+    "service": "assistant",
+    "claim": "some other fault in assistant",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   }
+  },
+  "steps": [
+   {
+    "probe": "pod_health:juice-shop",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "juice-shop-8c8bb97b8-klllh   1/1   Running   0     43m"
+   },
+   {
+    "probe": "pod_health:assistant",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "assistant-695dc9f7fb-5k4cr   1/1   Running   0     43m"
+   },
+   {
+    "probe": "queue_depth:assistant",
+    "outcome": "backlog",
+    "free": false,
+    "raw": "{\"queue_avg_2m\": 11.25}"
+   },
+   {
+    "probe": "gpu_memory:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"fb_used_share\": 0.7547448192609483}"
+   },
+   {
+    "probe": "recent_change:assistant",
+    "outcome": "unchanged",
+    "free": false,
+    "raw": "{\"revisions\": [[1, \"2026-10-21T13:53:23Z\"]], \"now\": \"2026-10-21T14:37:35Z\"}"
+   },
+   {
+    "probe": "event_reason:juice-shop",
+    "outcome": "none",
+    "free": false,
+    "raw": ""
+   },
+   {
+    "probe": "event_reason:assistant",
+    "outcome": "none",
+    "free": false,
+    "raw": ""
+   },
+   {
+    "probe": "memory_pressure:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"memory_vs_limit\": 0.168304443359375, \"oom_restarts_15m\": null}"
+   },
+   {
+    "probe": "recent_change:juice-shop",
+    "outcome": "unchanged",
+    "free": false,
+    "raw": "{\"revisions\": [[1, \"2026-10-21T13:53:23Z\"]], \"now\": \"2026-10-21T14:37:36Z\"}"
+   },
+   {
+    "probe": "deployment_ready:juice-shop",
+    "outcome": "ready",
+    "free": false,
+    "raw": "juice-shop   1/1   1     1     44m"
+   },
+   {
+    "probe": "service_ports:assistant",
+    "outcome": "ports_ok",
+    "free": false,
+    "raw": "T 8000\nassistant-695dc9f7fb-5k4cr   8000"
+   },
+   {
+    "probe": "endpoints:juice-shop",
+    "outcome": "has_endpoints",
+    "free": false,
+    "raw": "juice-shop   10.42.1.5:3000   44m"
+   },
+   {
+    "probe": "cpu_saturation:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"cpu_vs_limit_max_3m\": 0.007394280905248935}"
+   },
+   {
+    "probe": "service_ports:juice-shop",
+    "outcome": "ports_ok",
+    "free": false,
+    "raw": "T 3000\njuice-shop-8c8bb97b8-klllh   3000"
+   },
+   {
+    "probe": "deployment_ready:assistant",
+    "outcome": "ready",
+    "free": false,
+    "raw": "assistant   1/1   1     1     44m"
+   }
+  ],
+  "unavailable": [],
+  "posteriors": {
+   "H1": 0.002968870196394537,
+   "H2": 0.002775248227064459,
+   "H3": 0.015793543739665534,
+   "H4": 0.006143269890678964,
+   "H5": 0.04639749897817404,
+   "H6": 0.0023880042884043013,
+   "U1": 0.0013336119726625212,
+   "U2": 0.0024628106605032694,
+   "H0": 0.9197371420464523
+  },
+  "p_fault": 0.0802628579535477,
+  "service_marginals": {
+   "assistant": 0.03253174700271107,
+   "juice-shop": 0.047731110950836556
+  },
+  "stop_reason": "budget",
+  "checks_paid": 13
+ },
+ "diagnosis": {
+  "service": "juice-shop",
+  "hypothesis": "The juice-shop is causing excessive traffic to the assistant, leading to queueing",
+  "remedy": "scale_out:juice-shop",
+  "p_remedy": 0.046,
+  "decision": "escalate"
+ },
+ "messages": [
+  {
+   "ts": "2026-10-21T14:37:36+00:00",
+   "text": "ESCALATION [20261021-143709-0339] AssistantBacklog\nDiagnosis: juice-shop (p=0.05) - The juice-shop is causing excessive traffic to the assistant, leading to queueing\nProposed: scale_out:juice-shop (p=0.05, threshold 0.78)\nEvidence: queue_depth:assistant=backlog; gpu_memory:assistant=ok; recent_change:assistant=unchanged; event_reason:juice-shop=none; event_reason:assistant=none; memory_pressure:assistant=ok; recent_change:juice-shop=unchanged; deployment_ready:juice-shop=ready; service_ports:assistant=ports_ok; endpoints:juice-shop=has_endpoints; cpu_saturation:assistant=ok; service_ports:juice-shop=ports_ok; deployment_ready:assistant=ready\nApprove the proposed fix: curl -X POST http://localhost:8480/incidents/20261021-143709-0339/approve"
+  }
+ ],
+ "llm_usage": {
+  "calls": 1,
+  "input_tokens": 1439,
+  "output_tokens": 916,
+  "contract_failures": 0,
+  "retries": 0,
+  "answered_by": [
+   "qwen3:8b"
+  ]
+ },
+ "seconds": 27.5
+}{
+ "id": "20261021-145459-f728",
+ "opened": "2026-10-21T14:54:59+00:00",
+ "platform": "k8s",
+ "autonomy": "act",
+ "agent_kind": "rule",
+ "rule_version": 2,
+ "alerts": [
+  {
+   "name": "ShopErrors",
+   "summary": "more than 5% errors from shop-assistant-8000@kubernetes",
+   "started": "2026-10-21T14:54:39.136Z"
+  }
+ ],
+ "act_threshold": 0.783,
+ "generation": {
+  "dropped": 0
+ },
+ "remedy_checks": [],
+ "remedy_success": {
+  "rollout_undo:assistant": 0.976,
+  "restart:assistant": 0.219,
+  "rate_limit:assistant": 0.003
+ },
+ "investigation": {
+  "hypotheses": {
+   "H1": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to a misconfigured dependency or a faulty integration with the language model.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.8,
+    "predictions": {
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "connection_errors",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "H2": {
+    "service": "assistant",
+    "claim": "The assistant service is overwhelmed by a high volume of requests, causing the model to be saturated and leading to increased error rates.",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "connection_errors",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "queue_depth:assistant": "backlog",
+     "gpu_memory:assistant": "full",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H3": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to a recent deployment that introduced a bug or misconfiguration.",
+    "remedy": "rollout_undo:assistant",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "config_errors",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "H4": {
+    "service": "assistant",
+    "claim": "The assistant service is encountering errors due to a failed probe or liveness check, causing the pods to be marked as unhealthy.",
+    "remedy": "restart:assistant",
+    "catch_all": false,
+    "prior": 0.5,
+    "predictions": {
+     "event_reason:assistant": "none",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "H5": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to a recent change in the deployment that introduced a bug or misconfiguration.",
+    "remedy": "rollout_undo:assistant",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "config_errors",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "H6": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to an overloaded GPU, which is causing the model to be unresponsive and leading to increased errors.",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "connection_errors",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "queue_depth:assistant": "backlog",
+     "gpu_memory:assistant": "full",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H0": {
+    "service": null,
+    "claim": "No fault: every service is healthy",
+    "remedy": null,
+    "catch_all": false,
+    "prior": 0.1,
+    "predictions": {
+     "pod_health:juice-shop": "healthy",
+     "deployment_ready:juice-shop": "ready",
+     "endpoints:juice-shop": "has_endpoints",
+     "service_ports:juice-shop": "ports_ok",
+     "event_reason:juice-shop": "none",
+     "log_signature:juice-shop": "clean",
+     "cpu_saturation:juice-shop": "ok",
+     "memory_pressure:juice-shop": "ok",
+     "latency:juice-shop": "ok",
+     "error_rate:juice-shop": "ok",
+     "recent_change:juice-shop": "unchanged",
+     "pod_health:assistant": "healthy",
+     "deployment_ready:assistant": "ready",
+     "endpoints:assistant": "has_endpoints",
+     "service_ports:assistant": "ports_ok",
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "clean",
+     "cpu_saturation:assistant": "ok",
+     "memory_pressure:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok",
+     "recent_change:assistant": "unchanged",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "U1": {
+    "service": "juice-shop",
+    "claim": "some other fault in juice-shop",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   },
+   "U2": {
+    "service": "assistant",
+    "claim": "some other fault in assistant",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   }
+  },
+  "steps": [
+   {
+    "probe": "pod_health:juice-shop",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "juice-shop-8c8bb97b8-klllh   1/1   Running   0     61m"
+   },
+   {
+    "probe": "pod_health:assistant",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "assistant-68998fbbdd-r9b5t   1/1   Running   0     3m"
+   },
+   {
+    "probe": "error_rate:assistant",
+    "outcome": "errors",
+    "free": false,
+    "raw": "{\"rps\": 1.0, \"err_rps\": 1.0399168066554676}"
+   },
+   {
+    "probe": "queue_depth:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"queue_avg_2m\": 0.0}"
+   },
+   {
+    "probe": "gpu_memory:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"fb_used_share\": 0.7555495942592717}"
+   },
+   {
+    "probe": "memory_pressure:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"memory_vs_limit\": 0.164520263671875, \"oom_restarts_15m\": null}"
+   },
+   {
+    "probe": "recent_change:assistant",
+    "outcome": "changed",
+    "free": false,
+    "raw": "{\"revisions\": [[2, \"2026-10-21T14:51:59Z\"], [1, \"2026-10-21T13:53:23Z\"]], \"now\": \"2026-10-21T14:55:30Z\"}"
+   },
+   {
+    "probe": "gpu_util:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"util_avg_2m\": 0.0}"
+   }
+  ],
+  "unavailable": [],
+  "posteriors": {
+   "H1": 0.27666712620503964,
+   "H2": 0.0012564030667381505,
+   "H3": 0.23850614328020645,
+   "H4": 0.21942565181778997,
+   "H5": 0.23850614328020645,
+   "H6": 0.0012564030667381505,
+   "U1": 0.0010469405466346515,
+   "U2": 0.013389253543617318,
+   "H0": 0.009945935193029184
+  },
+  "p_fault": 0.9900540648069708,
+  "service_marginals": {
+   "assistant": 0.9890071242603361,
+   "juice-shop": 0.0010469405466346515
+  },
+  "stop_reason": "no_probe_worth_its_cost",
+  "checks_paid": 6
+ },
+ "diagnosis": {
+  "service": "assistant",
+  "hypothesis": "The assistant service is experiencing high error rates due to a misconfigured dependency or a faulty integration with the language model.",
+  "remedy": "rollout_undo:assistant",
+  "p_remedy": 0.976,
+  "decision": "act"
+ },
+ "policy": {
+  "allow": true,
+  "reasons": []
+ },
+ "action": {
+  "remedy": "rollout_undo:assistant",
+  "at": "2026-10-21T14:55:30+00:00"
+ },
+ "verification": {
+  "recovered": true,
+  "readings": {
+   "pod_health:assistant": "healthy",
+   "error_rate:assistant": "ok",
+   "latency:assistant": "ok",
+   "gpu_memory:assistant": "ok"
+  }
+ },
+ "messages": [
+  {
+   "ts": "2026-10-21T14:57:30+00:00",
+   "text": "RESOLVED [20261021-145459-f728] rollout_undo:assistant - recovery verified: {'pod_health:assistant': 'healthy', 'error_rate:assistant': 'ok', 'latency:assistant': 'ok', 'gpu_memory:assistant': 'ok'}"
+  }
+ ],
+ "llm_usage": {
+  "calls": 1,
+  "input_tokens": 1448,
+  "output_tokens": 1151,
+  "contract_failures": 0,
+  "retries": 0,
+  "answered_by": [
+   "qwen3:8b"
+  ]
+ },
+ "seconds": 151.3
+}{
+ "id": "20261021-150429-e90f",
+ "opened": "2026-10-21T15:04:29+00:00",
+ "platform": "k8s",
+ "autonomy": "act",
+ "agent_kind": "rule",
+ "rule_version": 2,
+ "alerts": [
+  {
+   "name": "ShopErrors",
+   "summary": "more than 5% errors from shop-assistant-8000@kubernetes",
+   "started": "2026-10-21T15:04:09.136Z"
+  }
+ ],
+ "act_threshold": 0.783,
+ "generation": {
+  "dropped": 0
+ },
+ "remedy_checks": [
+  "recent_change:juice-shop",
+  "log_signature:assistant"
+ ],
+ "remedy_success": {
+  "rollout_undo:assistant": 0.829,
+  "rate_limit:assistant": 0.005,
+  "rollout_undo:juice-shop": 0.001
+ },
+ "investigation": {
+  "hypotheses": {
+   "H1": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to a misconfigured dependency or a faulty integration with the language model.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.8,
+    "predictions": {
+     "error_rate:assistant": "errors",
+     "log_signature:assistant": "connection_errors",
+     "latency:assistant": "ok",
+     "event_reason:assistant": "none"
+    }
+   },
+   "H2": {
+    "service": "assistant",
+    "claim": "The assistant service is overwhelmed with requests, leading to high error rates due to queue depth and resource limitations.",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H3": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to GPU memory saturation, which is causing the model to fail or slow down.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "gpu_memory:assistant": "full",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "gpu_util:assistant": "saturated"
+    }
+   },
+   "H4": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high error rates due to a recent deployment that introduced a bug or misconfiguration.",
+    "remedy": "rollout_undo:assistant",
+    "catch_all": false,
+    "prior": 0.5,
+    "predictions": {
+     "recent_change:assistant": "changed",
+     "error_rate:assistant": "errors",
+     "log_signature:assistant": "config_errors",
+     "latency:assistant": "ok"
+    }
+   },
+   "H5": {
+    "service": "juice-shop",
+    "claim": "The juice-shop service is experiencing high error rates due to a misconfigured dependency or a faulty integration with an external service.",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "error_rate:juice-shop": "errors",
+     "log_signature:juice-shop": "connection_errors",
+     "latency:juice-shop": "ok",
+     "event_reason:juice-shop": "none"
+    }
+   },
+   "H6": {
+    "service": "juice-shop",
+    "claim": "The juice-shop service is experiencing high error rates due to a recent deployment that introduced a bug or misconfiguration.",
+    "remedy": "rollout_undo:juice-shop",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "recent_change:juice-shop": "changed",
+     "error_rate:juice-shop": "errors",
+     "log_signature:juice-shop": "config_errors",
+     "latency:juice-shop": "ok"
+    }
+   },
+   "H0": {
+    "service": null,
+    "claim": "No fault: every service is healthy",
+    "remedy": null,
+    "catch_all": false,
+    "prior": 0.1,
+    "predictions": {
+     "pod_health:juice-shop": "healthy",
+     "deployment_ready:juice-shop": "ready",
+     "endpoints:juice-shop": "has_endpoints",
+     "service_ports:juice-shop": "ports_ok",
+     "event_reason:juice-shop": "none",
+     "log_signature:juice-shop": "clean",
+     "cpu_saturation:juice-shop": "ok",
+     "memory_pressure:juice-shop": "ok",
+     "latency:juice-shop": "ok",
+     "error_rate:juice-shop": "ok",
+     "recent_change:juice-shop": "unchanged",
+     "pod_health:assistant": "healthy",
+     "deployment_ready:assistant": "ready",
+     "endpoints:assistant": "has_endpoints",
+     "service_ports:assistant": "ports_ok",
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "clean",
+     "cpu_saturation:assistant": "ok",
+     "memory_pressure:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok",
+     "recent_change:assistant": "unchanged",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "U1": {
+    "service": "juice-shop",
+    "claim": "some other fault in juice-shop",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   },
+   "U2": {
+    "service": "assistant",
+    "claim": "some other fault in assistant",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   }
+  },
+  "steps": [
+   {
+    "probe": "pod_health:juice-shop",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "juice-shop-8c8bb97b8-klllh   1/1   Running   0     71m"
+   },
+   {
+    "probe": "pod_health:assistant",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "assistant-68998fbbdd-dv8bj   1/1   Running   0     2m53s"
+   },
+   {
+    "probe": "error_rate:assistant",
+    "outcome": "errors",
+    "free": false,
+    "raw": "{\"rps\": 0.86, \"err_rps\": 0.86}"
+   },
+   {
+    "probe": "event_reason:assistant",
+    "outcome": "none",
+    "free": false,
+    "raw": ""
+   },
+   {
+    "probe": "gpu_util:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"util_avg_2m\": 0.0}"
+   },
+   {
+    "probe": "memory_pressure:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"memory_vs_limit\": 0.164794921875, \"oom_restarts_15m\": null}"
+   },
+   {
+    "probe": "error_rate:juice-shop",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"rps\": 14.1, \"err_rps\": 0.0}"
+   },
+   {
+    "probe": "recent_change:assistant",
+    "outcome": "changed",
+    "free": false,
+    "raw": "{\"revisions\": [[4, \"2026-10-21T14:51:59Z\"], [3, \"2026-10-21T13:53:23Z\"]], \"now\": \"2026-10-21T15:04:52Z\"}"
+   },
+   {
+    "probe": "gpu_memory:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"fb_used_share\": 0.7555495942592717}"
+   },
+   {
+    "probe": "queue_depth:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"queue_avg_2m\": 0.0}"
+   },
+   {
+    "probe": "deployment_ready:assistant",
+    "outcome": "ready",
+    "free": false,
+    "raw": "assistant   1/1   1     1     71m"
+   },
+   {
+    "probe": "endpoints:assistant",
+    "outcome": "has_endpoints",
+    "free": false,
+    "raw": "assistant   10.42.1.9:8000   71m"
+   },
+   {
+    "probe": "service_ports:assistant",
+    "outcome": "ports_ok",
+    "free": false,
+    "raw": "T 8000\nassistant-68998fbbdd-dv8bj   8000"
+   },
+   {
+    "probe": "cpu_saturation:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"cpu_vs_limit_max_3m\": 0.027420377280488517}"
+   },
+   {
+    "probe": "recent_change:juice-shop",
+    "outcome": "unchanged",
+    "free": false,
+    "raw": "{\"revisions\": [[1, \"2026-10-21T13:53:23Z\"]], \"now\": \"2026-10-21T15:04:53Z\"}"
+   },
+   {
+    "probe": "log_signature:assistant",
+    "outcome": "connection_errors",
+    "free": false,
+    "raw": "2026-10-21 15:02:47,021 INFO httpx: HTTP Request: GET http://juice-shop.shop.svc:3000/api/Products/8 \"HTTP/1.1 200 OK\"\n2026-10-21 15:02:47,024 ERROR assistant: upstream unreachable: ConnectError: [Errno -2] Name or service not known (http://model-gateway.ai.svc:11434/api/chat)\n2026-10-21 15:02:47,069 INFO httpx: HTTP Request: GET http://juice-shop.shop.svc:3000/api/Products/38 \"HTTP/1.1 200 OK\"\n20"
+   }
+  ],
+  "unavailable": [],
+  "posteriors": {
+   "H1": 0.7980294064627674,
+   "H2": 0.005428570406925736,
+   "H3": 0.0029394468306940314,
+   "H4": 0.022121808493611478,
+   "H5": 0.002837792629701283,
+   "H6": 0.000620110241305095,
+   "U1": 0.004349107478469398,
+   "U2": 0.009811033083235181,
+   "H0": 0.1538627243732904
+  },
+  "p_fault": 0.8461372756267096,
+  "service_marginals": {
+   "assistant": 0.8383302652772338,
+   "juice-shop": 0.007807010349475776
+  },
+  "stop_reason": "budget",
+  "checks_paid": 14
+ },
+ "diagnosis": {
+  "service": "assistant",
+  "hypothesis": "The assistant service is experiencing high error rates due to a misconfigured dependency or a faulty integration with the language model.",
+  "remedy": "rollout_undo:assistant",
+  "p_remedy": 0.829,
+  "decision": "act"
+ },
+ "policy": {
+  "allow": true,
+  "reasons": []
+ },
+ "action": {
+  "remedy": "rollout_undo:assistant",
+  "at": "2026-10-21T15:04:53+00:00"
+ },
+ "verification": {
+  "recovered": true,
+  "readings": {
+   "pod_health:assistant": "healthy",
+   "error_rate:assistant": "ok",
+   "latency:assistant": "ok",
+   "gpu_memory:assistant": "ok"
+  }
+ },
+ "messages": [
+  {
+   "ts": "2026-10-21T15:06:53+00:00",
+   "text": "RESOLVED [20261021-150429-e90f] rollout_undo:assistant - recovery verified: {'pod_health:assistant': 'healthy', 'error_rate:assistant': 'ok', 'latency:assistant': 'ok', 'gpu_memory:assistant': 'ok'}"
+  }
+ ],
+ "llm_usage": {
+  "calls": 1,
+  "input_tokens": 1450,
+  "output_tokens": 882,
+  "contract_failures": 0,
+  "retries": 0,
+  "answered_by": [
+   "qwen3:8b"
+  ]
+ },
+ "seconds": 144.6
+}{
+ "id": "20261021-151409-93df",
+ "opened": "2026-10-21T15:14:09+00:00",
+ "platform": "k8s",
+ "autonomy": "act",
+ "agent_kind": "rule",
+ "rule_version": 2,
+ "alerts": [
+  {
+   "name": "ShopErrors",
+   "summary": "more than 5% errors from shop-assistant-8000@kubernetes",
+   "started": "2026-10-21T15:13:49.136Z"
+  }
+ ],
+ "act_threshold": 0.783,
+ "generation": {
+  "dropped": 0
+ },
+ "remedy_checks": [],
+ "remedy_success": {
+  "rollout_undo:assistant": 0.929,
+  "restart:assistant": 0.052,
+  "rate_limit:assistant": 0.027
+ },
+ "investigation": {
+  "hypotheses": {
+   "H1": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing connection errors due to a failed dependency",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.8,
+    "predictions": {
+     "log_signature:assistant": "connection_errors",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok",
+     "event_reason:assistant": "none"
+    }
+   },
+   "H2": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high latency due to GPU saturation",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.7,
+    "predictions": {
+     "gpu_util:assistant": "saturated",
+     "latency:assistant": "slow",
+     "queue_depth:assistant": "backlog",
+     "error_rate:assistant": "ok"
+    }
+   },
+   "H3": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing high GPU memory usage",
+    "remedy": "none",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "gpu_memory:assistant": "full",
+     "latency:assistant": "slow",
+     "error_rate:assistant": "ok",
+     "queue_depth:assistant": "backlog"
+    }
+   },
+   "H4": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing a recent change that introduced errors",
+    "remedy": "rollout_undo:assistant",
+    "catch_all": false,
+    "prior": 0.5,
+    "predictions": {
+     "recent_change:assistant": "changed",
+     "log_signature:assistant": "config_errors",
+     "error_rate:assistant": "errors",
+     "latency:assistant": "ok"
+    }
+   },
+   "H5": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing probe failures due to misconfigured health checks",
+    "remedy": "restart:assistant",
+    "catch_all": false,
+    "prior": 0.4,
+    "predictions": {
+     "event_reason:assistant": "probe_failure",
+     "pod_health:assistant": "unhealthy",
+     "deployment_ready:assistant": "degraded",
+     "endpoints:assistant": "no_endpoints"
+    }
+   },
+   "H6": {
+    "service": "assistant",
+    "claim": "The assistant service is experiencing a backlog due to insufficient model capacity",
+    "remedy": "rate_limit:assistant",
+    "catch_all": false,
+    "prior": 0.6,
+    "predictions": {
+     "queue_depth:assistant": "backlog",
+     "latency:assistant": "slow",
+     "error_rate:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "H0": {
+    "service": null,
+    "claim": "No fault: every service is healthy",
+    "remedy": null,
+    "catch_all": false,
+    "prior": 0.1,
+    "predictions": {
+     "pod_health:juice-shop": "healthy",
+     "deployment_ready:juice-shop": "ready",
+     "endpoints:juice-shop": "has_endpoints",
+     "service_ports:juice-shop": "ports_ok",
+     "event_reason:juice-shop": "none",
+     "log_signature:juice-shop": "clean",
+     "cpu_saturation:juice-shop": "ok",
+     "memory_pressure:juice-shop": "ok",
+     "latency:juice-shop": "ok",
+     "error_rate:juice-shop": "ok",
+     "recent_change:juice-shop": "unchanged",
+     "pod_health:assistant": "healthy",
+     "deployment_ready:assistant": "ready",
+     "endpoints:assistant": "has_endpoints",
+     "service_ports:assistant": "ports_ok",
+     "event_reason:assistant": "none",
+     "log_signature:assistant": "clean",
+     "cpu_saturation:assistant": "ok",
+     "memory_pressure:assistant": "ok",
+     "latency:assistant": "ok",
+     "error_rate:assistant": "ok",
+     "recent_change:assistant": "unchanged",
+     "queue_depth:assistant": "ok",
+     "gpu_memory:assistant": "ok",
+     "gpu_util:assistant": "ok"
+    }
+   },
+   "U1": {
+    "service": "juice-shop",
+    "claim": "some other fault in juice-shop",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   },
+   "U2": {
+    "service": "assistant",
+    "claim": "some other fault in assistant",
+    "remedy": null,
+    "catch_all": true,
+    "prior": 0.0,
+    "predictions": {}
+   }
+  },
+  "steps": [
+   {
+    "probe": "pod_health:juice-shop",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "juice-shop-8c8bb97b8-klllh   1/1   Running   0     80m"
+   },
+   {
+    "probe": "pod_health:assistant",
+    "outcome": "healthy",
+    "free": true,
+    "raw": "assistant-68998fbbdd-tt9kw   1/1   Running   0     2m56s"
+   },
+   {
+    "probe": "latency:assistant",
+    "outcome": "ok",
+    "free": false,
+    "raw": "{\"p95_s\": 0.095}"
+   },
+   {
+    "probe": "error_rate:assistant",
+    "outcome": "errors",
+    "free": false,
+    "raw": "{\"rps\": 0.68, \"err_rps\": 0.68}"
+   },
+   {
+    "probe": "event_reason:assistant",
+    "outcome": "probe_failure",
+    "free": false,
+    "raw": "3m7s   Warning   Unhealthy   pod/assistant-695dc9f7fb-mlzc7   Readiness probe failed: Get \"http://10.42.1.10:8000/assistant/healthz\": dial tcp 10.42.1.10:8000: connect: connection refused"
+   },
+   {
+    "probe": "recent_change:assistant",
+    "outcome": "changed",
+    "free": false,
+    "raw": "{\"revisions\": [[6, \"2026-10-21T14:51:59Z\"], [5, \"2026-10-21T13:53:23Z\"]], \"now\": \"2026-10-21T15:14:30Z\"}"
+   },
+   {
+    "probe": "deployment_ready:assistant",
+    "outcome": "ready",
+    "free": false,
+    "raw": "assistant   1/1   1     1     81m"
+   }
+  ],
+  "unavailable": [],
+  "posteriors": {
+   "H1": 0.11828146861776068,
+   "H2": 0.013854822073629685,
+   "H3": 0.012789066529504328,
+   "H4": 0.7190268223869136,
+   "H5": 0.05179571944449254,
+   "H6": 0.012789066529504328,
+   "U1": 0.00012161837271924498,
+   "U2": 0.07018604150464278,
+   "H0": 0.0011553745408328276
+  },
+  "p_fault": 0.9988446254591672,
+  "service_marginals": {
+   "assistant": 0.9987230070864479,
+   "juice-shop": 0.00012161837271924498
+  },
+  "stop_reason": "no_probe_worth_its_cost",
+  "checks_paid": 5
+ },
+ "diagnosis": {
+  "service": "assistant",
+  "hypothesis": "The assistant service is experiencing a recent change that introduced errors",
+  "remedy": "rollout_undo:assistant",
+  "p_remedy": 0.929,
+  "decision": "act"
+ },
+ "policy": {
+  "allow": true,
+  "reasons": []
+ },
+ "action": {
+  "remedy": "rollout_undo:assistant",
+  "at": "2026-10-21T15:14:30+00:00"
+ },
+ "verification": {
+  "recovered": true,
+  "readings": {
+   "pod_health:assistant": "healthy",
+   "error_rate:assistant": "ok",
+   "latency:assistant": "ok",
+   "gpu_memory:assistant": "ok"
+  }
+ },
+ "messages": [
+  {
+   "ts": "2026-10-21T15:16:30+00:00",
+   "text": "RESOLVED [20261021-151409-93df] rollout_undo:assistant - recovery verified: {'pod_health:assistant': 'healthy', 'error_rate:assistant': 'ok', 'latency:assistant': 'ok', 'gpu_memory:assistant': 'ok'}"
+  }
+ ],
+ "llm_usage": {
+  "calls": 1,
+  "input_tokens": 1450,
+  "output_tokens": 787,
+  "contract_failures": 0,
+  "retries": 0,
+  "answered_by": [
+   "qwen3:8b"
+  ]
+ },
+ "seconds": 141.6
+}

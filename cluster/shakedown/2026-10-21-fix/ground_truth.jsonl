@@ -1,0 +1,9 @@
+{"ts": "2026-10-21T14:51:59+00:00", "event": "inject", "fault_id": "c1d38c21", "fault": "assistant_bad_url", "service": "assistant", "correct_remedy": "rollout_undo:assistant", "also_correct": []}
+{"ts": "2026-10-21T14:55:39+00:00", "event": "resolved", "fault_id": "c1d38c21", "fault": "assistant_bad_url", "minutes": 3.7}
+{"ts": "2026-10-21T14:55:39+00:00", "event": "end", "fault_id": "c1d38c21", "fault": "assistant_bad_url", "ended_by": "fixed_before_injector_heal"}
+{"ts": "2026-10-21T15:01:36+00:00", "event": "inject", "fault_id": "2f3bc817", "fault": "assistant_bad_url", "service": "assistant", "correct_remedy": "rollout_undo:assistant", "also_correct": []}
+{"ts": "2026-10-21T15:04:54+00:00", "event": "resolved", "fault_id": "2f3bc817", "fault": "assistant_bad_url", "minutes": 3.3}
+{"ts": "2026-10-21T15:04:54+00:00", "event": "end", "fault_id": "2f3bc817", "fault": "assistant_bad_url", "ended_by": "fixed_before_injector_heal"}
+{"ts": "2026-10-21T15:11:13+00:00", "event": "inject", "fault_id": "7e202e19", "fault": "assistant_bad_url", "service": "assistant", "correct_remedy": "rollout_undo:assistant", "also_correct": []}
+{"ts": "2026-10-21T15:14:39+00:00", "event": "resolved", "fault_id": "7e202e19", "fault": "assistant_bad_url", "minutes": 3.4}
+{"ts": "2026-10-21T15:14:39+00:00", "event": "end", "fault_id": "7e202e19", "fault": "assistant_bad_url", "ended_by": "fixed_before_injector_heal"}
