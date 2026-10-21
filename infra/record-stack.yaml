@@ -6,7 +6,7 @@ Description: >-
 
 Metadata:
   why: >-
-    On-demand, not Spot - a 30 h recording must not be interrupted. Tagged incident-commander-bench so a
+    On-demand, not Spot - a 30 h recording must not be interrupted. Tagged incident-commander-gpu (both tags are in the collaborator policy) so a
     collaborator with infra/collaborator-policy.json can start, stop and use it without creating anything.
 
 Parameters:
@@ -34,7 +34,7 @@ Resources:
             Principal: { Service: ec2.amazonaws.com }
             Action: sts:AssumeRole
       ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
-      Tags: [{ Key: project, Value: incident-commander-bench }]
+      Tags: [{ Key: project, Value: incident-commander-gpu }]
 
   Profile:
     Type: AWS::IAM::InstanceProfile
@@ -56,7 +56,7 @@ Resources:
       BlockDeviceMappings: [{ DeviceName: /dev/sda1, Ebs: { VolumeSize: 40, VolumeType: gp3, DeleteOnTermination: true } }]
       Tags:
         - { Key: Name, Value: !Ref AWS::StackName }
-        - { Key: project, Value: incident-commander-bench }
+        - { Key: project, Value: incident-commander-gpu }
         - { Key: role, Value: recorder }
       UserData:
         Fn::Base64: !Sub |

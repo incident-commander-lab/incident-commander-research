@@ -14,7 +14,7 @@
 # Profile: IC_AWS_PROFILE (default ic-bench), e.g. IC_AWS_PROFILE=nour infra/record.sh status
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-PROFILE=${IC_AWS_PROFILE:-ic-bench}; REGION=eu-north-1; STACK=ic-record
+PROFILE=${IC_AWS_PROFILE:-ic-bench}; REGION=eu-north-1; STACK=ic-gpu-recorder   # ic-gpu*: the only names ic-gpu-stockholm may create
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 aws_() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
@@ -51,7 +51,7 @@ up)
   SUB=$(aws_ ec2 describe-subnets --filters Name=default-for-az,Values=true Name=availability-zone,Values=eu-north-1a --query 'Subnets[0].SubnetId' --output text)
   say "Creating $STACK (t3.medium on-demand, eu-north-1a)"
   aws_ cloudformation create-stack --stack-name "$STACK" --template-body "file://$REPO/infra/record-stack.yaml" \
-    --capabilities CAPABILITY_NAMED_IAM --tags Key=project,Value=incident-commander-bench \
+    --capabilities CAPABILITY_NAMED_IAM --tags Key=project,Value=incident-commander-gpu \
     --parameters ParameterKey=SubnetId,ParameterValue="$SUB" ParameterKey=SecurityGroupId,ParameterValue="$SG" >/dev/null
   aws_ cloudformation wait stack-create-complete --stack-name "$STACK"
   echo "created $(iid). Next: infra/record.sh start 'YYYY-MM-DD HH:MM'  (UTC stop time)"
