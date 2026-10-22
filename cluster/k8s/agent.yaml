@@ -71,6 +71,7 @@ spec:
           imagePullPolicy: IfNotPresent
           env:
             - { name: AUTONOMY, value: "shadow" }          # shadow | suggest | act
+            - { name: AGENT_KIND, value: "rule" }          # rule (frozen rule v2) | llm (plain LLM agent, RQ3 setup 2)
             - { name: VERIFY_SECONDS, value: "120" }
             - { name: IC_PROVIDER, value: openrouter_models }
             - { name: IC_OPENROUTER_MODELS, value: "ollama:qwen3:8b" }

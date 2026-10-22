@@ -69,3 +69,31 @@ def test_assistant_dead_model_address_reads_as_connection_errors():
     access = 'INFO:     10.42.0.9:51234 - "POST /assistant/ask HTTP/1.1" 503 Service Unavailable'
     assert label_log_signature("\n".join([line, access] * 10), "assistant") == "connection_errors"
     assert label_log_signature("\n".join([access] * 20), "assistant") == "clean"
+
+
+def test_plain_llm_agent_runs_checks_then_acts_through_the_shared_safety_net(monkeypatch, tmp_path):
+    # RQ3 setup 2 on the cluster: the LLM picks checks and the fix; OPA, threshold and verification are shared
+    from ic_cluster import agent as A, llm_agent as L, probes
+    monkeypatch.setattr(A, "OUT", tmp_path)
+    monkeypatch.setattr(A, "AUTONOMY", "act")
+    monkeypatch.setattr(probes, "run", lambda p: ("raw", "errors" if p.key == "error_rate:assistant" else p.outcomes[-1]))
+    replies = iter([L._Step(thought="t", next="check", check="error_rate:assistant"),
+                    L._Step(thought="t", next="check", check="error_rate:assistant"),   # repeat: handed back, not re-run
+                    L._Step(thought="t", next="decide", service="assistant", cause="bad release",
+                            remedy="rollout_undo:assistant", confidence=0.9)])
+    monkeypatch.setattr(L.llm, "json_call", lambda *a, **k: next(replies))
+    acted = []
+    monkeypatch.setattr(A, "_act", lambda rec, remedy, p, pr, approved: acted.append((remedy, p)))
+    rec = L.handle_llm([{"name": "ShopErrors", "summary": "assistant 5xx"}])
+    assert rec["agent_kind"] == "llm" and rec["investigation"]["checks_paid"] == 1
+    assert rec["investigation"]["errors"] == ["repeated check error_rate:assistant"]
+    assert rec["diagnosis"]["decision"] == "act" and acted == [("rollout_undo:assistant", 0.9)]
+    assert (tmp_path / f"{rec['id']}.json").exists()
+    assert A.PLATFORM in L._system(probes.instances()) and A.SYMPTOMS in L._system(probes.instances())
+
+
+def test_rule_and_llm_agents_are_told_the_same_about_the_system():
+    from ic_cluster import agent as A, llm_agent as L, probes
+    pr = probes.instances()
+    for text in (A.PLATFORM, A.SYMPTOMS):
+        assert text in A._system(pr) and text in L._system(pr)

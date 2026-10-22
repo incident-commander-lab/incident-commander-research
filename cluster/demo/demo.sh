@@ -9,6 +9,7 @@
 #   cluster/demo/demo.sh feed [n]         the agent's last n messages (default 3)
 #   cluster/demo/demo.sh approve <id>     approve an escalated incident's proposed fix (the human in the loop)
 #   cluster/demo/demo.sh act | shadow     agent autonomy: act (fixes) or shadow (only says what it would do)
+#   cluster/demo/demo.sh kind rule|llm    which agent decides: the frozen rule or the plain LLM agent (RQ3 setup 2)
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -41,5 +42,9 @@ approve)
 act|shadow)
   ops "kubectl -n agent set env deploy/ic-agent AUTONOMY=$1 >/dev/null && kubectl -n agent rollout status deploy/ic-agent --timeout=3m >/dev/null && echo 'agent autonomy: $1'" 300
   ;;
-*) sed -n 2,12p "$0"; exit 1 ;;
+kind)
+  K2=${2:?rule or llm}; [ "$K2" = rule ] || [ "$K2" = llm ] || { echo "kind must be rule or llm"; exit 1; }
+  ops "kubectl -n agent set env deploy/ic-agent AGENT_KIND=$K2 >/dev/null && kubectl -n agent rollout status deploy/ic-agent --timeout=3m >/dev/null && echo 'agent: $K2'" 300
+  ;;
+*) sed -n 2,13p "$0"; exit 1 ;;
 esac
