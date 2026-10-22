@@ -1,0 +1,233 @@
+# Pulse (the RQ3 Compose test bed, testbed/) in the cluster: live Wikipedia edit stream -> collector ->
+# Redis stream -> worker -> Postgres -> api. Same image and code as Compose (testbed/app). Differences:
+# - a release is the Deployment's environment (a rollout; RELEASE_VERSION names it), as for the shop;
+# - the collector reaches stream.wikimedia.org through the egress relay at a fixed Service address
+#   (hostAliases), so `upstream_cut` can take "the internet" away by stopping the relay;
+# - collector and worker share their pod's process namespace, so `*_hung` can freeze the app process
+#   (PID 1 of a container ignores SIGSTOP sent from inside its own namespace).
+# Images: ic/pulse:1.0.0 is built from testbed/app by gpu.sh deploy / cluster.sh.
+apiVersion: v1
+kind: Namespace
+metadata: { name: pulse }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: pgdata, namespace: pulse }
+spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 2Gi } } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: recordings, namespace: pulse }
+spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 5Gi } } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: postgres, namespace: pulse }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: postgres } }
+  template:
+    metadata: { labels: { app: postgres } }
+    spec:
+      nodeSelector: { role: apps }
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: pulse }
+            - { name: POSTGRES_PASSWORD, value: pulse }          # inside the private cluster only, as in Compose
+            - { name: POSTGRES_DB, value: pulse }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pg }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe: { exec: { command: [pg_isready, -U, pulse] }, periodSeconds: 5 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          resources: { requests: { cpu: 100m, memory: 256Mi }, limits: { memory: 1Gi } }
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: pgdata } }
+        - { name: init, configMap: { name: pulse-db-init } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: postgres, namespace: pulse }
+spec: { selector: { app: postgres }, ports: [{ port: 5432 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: redis, namespace: pulse }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: redis } }
+  template:
+    metadata: { labels: { app: redis } }
+    spec:
+      nodeSelector: { role: apps }
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          args: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "noeviction"]
+          ports: [{ containerPort: 6379 }]
+          readinessProbe: { exec: { command: [redis-cli, ping] }, periodSeconds: 5 }
+          resources: { requests: { cpu: 50m, memory: 64Mi }, limits: { memory: 512Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: redis, namespace: pulse }
+spec: { selector: { app: redis }, ports: [{ port: 6379 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: egress, namespace: pulse }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: egress } }
+  template:
+    metadata: { labels: { app: egress } }
+    spec:
+      nodeSelector: { role: apps }
+      containers:
+        - name: egress
+          image: nginx:1.27-alpine
+          ports: [{ containerPort: 443 }, { containerPort: 8443 }]
+          volumeMounts: [{ name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }]
+          resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 64Mi } }
+      volumes: [{ name: conf, configMap: { name: pulse-egress } }]
+---
+apiVersion: v1
+kind: Service
+metadata: { name: egress, namespace: pulse }
+spec:
+  clusterIP: 10.43.77.50          # fixed: the collector's hostAliases point stream.wikimedia.org here (k3s service CIDR)
+  selector: { app: egress }
+  ports: [{ name: tls, port: 443 }, { name: health, port: 8443 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: collector, namespace: pulse }
+spec:
+  replicas: 1
+  strategy: { type: Recreate }   # one stream connection, one consumer of a replay file
+  selector: { matchLabels: { app: collector } }
+  template:
+    metadata:
+      labels: { app: collector }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9101", prometheus.io/path: /metrics }
+    spec:
+      nodeSelector: { role: apps }
+      shareProcessNamespace: true
+      hostAliases: [{ ip: 10.43.77.50, hostnames: [stream.wikimedia.org] }]
+      containers:
+        - name: collector
+          image: ic/pulse:1.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: ROLE, value: collector }
+            - { name: SERVICE_NAME, value: collector }
+            - { name: METRICS_PORT, value: "9101" }
+            - { name: RELEASE_VERSION, value: "1.0.0" }
+            - { name: REDIS_URL, value: "redis://redis:6379" }
+            - { name: DATABASE_URL, value: "postgres://pulse:pulse@postgres:5432/pulse" }
+            - { name: USER_AGENT, value: "pulse-testbed/0.1 (research test bed; https://github.com/incident-commander-lab)" }
+            - { name: EGRESS_PROBE_HOST, value: egress }
+            - { name: REPLAY_FILE, value: "" }      # RQ3 sessions: /recordings/<file>.ndjson
+            - { name: REPLAY_SPEED, value: "1" }
+            - { name: SESSION_START, value: "" }
+          volumeMounts: [{ name: recordings, mountPath: /recordings }]
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 384Mi } }
+      volumes: [{ name: recordings, persistentVolumeClaim: { claimName: recordings } }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: worker, namespace: pulse }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: worker } }
+  template:
+    metadata:
+      labels: { app: worker }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9102", prometheus.io/path: /metrics }
+    spec:
+      nodeSelector: { role: apps }
+      shareProcessNamespace: true
+      containers:
+        - name: worker
+          image: ic/pulse:1.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: ROLE, value: worker }
+            - { name: SERVICE_NAME, value: worker }
+            - { name: METRICS_PORT, value: "9102" }
+            - { name: RELEASE_VERSION, value: "1.0.0" }
+            - { name: REDIS_URL, value: "redis://redis:6379" }
+            - { name: DATABASE_URL, value: "postgres://pulse:pulse@postgres:5432/pulse" }
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 384Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: api, namespace: pulse }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: api } }
+  template:
+    metadata:
+      labels: { app: api }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "3000", prometheus.io/path: /metrics }
+    spec:
+      nodeSelector: { role: apps }
+      containers:
+        - name: api
+          image: ic/pulse:1.0.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: ROLE, value: api }
+            - { name: SERVICE_NAME, value: api }
+            - { name: PORT, value: "3000" }
+            - { name: RELEASE_VERSION, value: "1.0.0" }
+            - { name: REDIS_URL, value: "redis://redis:6379" }
+            - { name: DATABASE_URL, value: "postgres://pulse:pulse@postgres:5432/pulse" }
+          ports: [{ containerPort: 3000 }]
+          resources: { requests: { cpu: 50m, memory: 96Mi }, limits: { memory: 384Mi } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: api, namespace: pulse }
+spec: { selector: { app: api }, ports: [{ port: 3000 }] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: redis-exporter, namespace: pulse }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: redis-exporter } }
+  template:
+    metadata:
+      labels: { app: redis-exporter }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9121", prometheus.io/path: /metrics }
+    spec:
+      nodeSelector: { role: ops }
+      containers:
+        - name: exporter
+          image: oliver006/redis_exporter:v1.66.0
+          env: [{ name: REDIS_ADDR, value: "redis://redis:6379" }]
+          resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 64Mi } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: postgres-exporter, namespace: pulse }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: postgres-exporter } }
+  template:
+    metadata:
+      labels: { app: postgres-exporter }
+      annotations: { prometheus.io/scrape: "true", prometheus.io/port: "9187", prometheus.io/path: /metrics }
+    spec:
+      nodeSelector: { role: ops }
+      containers:
+        - name: exporter
+          image: quay.io/prometheuscommunity/postgres-exporter:v0.16.0
+          env: [{ name: DATA_SOURCE_NAME, value: "postgresql://pulse:pulse@postgres:5432/pulse?sslmode=disable" }]
+          resources: { requests: { cpu: 10m, memory: 16Mi }, limits: { memory: 64Mi } }

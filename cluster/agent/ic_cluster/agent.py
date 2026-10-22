@@ -78,9 +78,15 @@ class _Resp(BaseModel):
 
 
 # What both agents are told about the system (the rule's hypothesis prompt and the plain LLM agent's)
-PLATFORM = """a web
+_DESCRIBE = {
+    "shop": """a web
 shop running on Kubernetes: juice-shop (the shop, Node.js, one CPU per replica, behind an ingress)
-and assistant (the shop's AI chat; it calls a language model served on a GPU)"""
+and assistant (the shop's AI chat; it calls a language model served on a GPU)""",
+    "pulse": """a live data pipeline running on Kubernetes:
+collector (reads the Wikimedia event stream over the internet) -> redis (a stream) -> worker -> postgres
+-> api""",
+}
+PLATFORM = " and ".join(_DESCRIBE[a] for a in probes.APPS)
 SYMPTOMS = """Errors and slowness are separate symptoms: a service that
 cannot reach a dependency (wrong address, dependency down) fails FAST - errors at normal latency,
 connection_errors in its logs; slowness comes from saturation, queueing or an overloaded model."""
@@ -184,6 +190,14 @@ _RECOVERY = {  # remedy -> checks that must read healthy afterwards (unreadable 
     "restart:juice-shop": ["pod_health:juice-shop", "error_rate:juice-shop"],
     "restart:assistant": ["pod_health:assistant", "error_rate:assistant"],
     "block_client": ["attack_signature:juice-shop", "error_rate:juice-shop"],
+    "rollout_undo:worker": ["pod_health:worker", "throughput:worker", "log_signature:worker"],
+    "rollout_undo:collector": ["pod_health:collector", "throughput:collector", "source_connected:collector"],
+    "restart:worker": ["pod_health:worker", "throughput:worker"],
+    "restart:collector": ["pod_health:collector", "throughput:collector"],
+    "restart:api": ["pod_health:api", "endpoints:api"],
+    "scale_out:api": ["pod_health:api", "endpoints:api"],
+    "kill_blocking_sessions:postgres": ["db_locks:postgres", "throughput:worker"],
+    "restore_redis_maxmemory:redis": ["redis_memory:redis", "throughput:collector"],
 }
 
 

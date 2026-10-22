@@ -99,7 +99,7 @@ deploy)
   say "Waiting for the ops machine and the 3-node cluster"
   for i in $(seq 1 60); do host 40 'test -f /var/lib/ic-ops-ready && k3s kubectl get nodes --no-headers 2>/dev/null | grep -c " Ready"' | tail -1 | grep -q 3 && break; printf .; sleep 15; done; echo
   say "Copying the code to the ops machine"
-  git -C "$REPO" archive HEAD cluster ic | gzip -9 | base64 | tr -d '\n' > "$TMP/code.b64"
+  git -C "$REPO" archive HEAD cluster ic testbed/app testbed/db/init.sql testbed/egress | gzip -9 | base64 | tr -d '\n' > "$TMP/code.b64"
   split -b 60000 "$TMP/code.b64" "$TMP/c_"
   n=0; for c in "$TMP"/c_*; do n=$((n+1)); { [ $n = 1 ] && echo 'rm -f /root/code.b64'; echo "printf %s '$(cat "$c")' >> /root/code.b64"; } > "$TMP/s.sh"; onhost 120 "$TMP/s.sh" >/dev/null; printf .; done; echo
   want=$(shasum -a 256 < "$TMP/code.b64" | cut -c1-16)
@@ -108,7 +108,8 @@ deploy)
   cat > "$TMP/deploy.sh" <<'DEPLOY'
 set -e
 cd /root/ic; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-for img in "assistant cluster/assistant" "chaos cluster/chaos" "replay cluster/load/replay"; do set -- $img
+R=registry.ic.local:5000
+for img in "assistant cluster/assistant" "chaos cluster/chaos" "replay cluster/load/replay" "pulse testbed/app"; do set -- $img
   docker build -q -t localhost:5000/ic/$1:1.0.0 $2 >/dev/null && docker push -q localhost:5000/ic/$1:1.0.0 >/dev/null; done
 docker build -q -f cluster/agent/Dockerfile -t localhost:5000/ic/cluster-agent:1.0.0 . >/dev/null && docker push -q localhost:5000/ic/cluster-agent:1.0.0 >/dev/null
 echo IMAGES_OK
@@ -122,9 +123,12 @@ helm upgrade --install grafana grafana/grafana --version 10.5.15 -n monitoring -
 for f in cluster/monitoring/dashboards/*.json; do n=$(basename $f .json)
   kubectl -n monitoring create configmap dash-$n --from-file=$n.json=$f --dry-run=client -o yaml | kubectl label --local -f - grafana_dashboard=1 -o yaml | kubectl apply -f - >/dev/null; done
 kubectl apply -f cluster/k8s/traefik-access-log.yaml >/dev/null   # the attack_signature check reads it
+kubectl create namespace pulse --dry-run=client -o yaml | kubectl apply -f - >/dev/null      # Pulse (testbed/) in the cluster
+kubectl -n pulse create configmap pulse-db-init --from-file=init.sql=testbed/db/init.sql --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n pulse create configmap pulse-egress --from-file=nginx.conf=testbed/egress/nginx.conf --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+sed -e "s#image: ic/pulse:1.0.0#image: $R/ic/pulse:1.0.0#" cluster/k8s/pulse.yaml | kubectl apply -f - >/dev/null
 kubectl apply -f cluster/k8s/ai.yaml >/dev/null
 kubectl -n ai rollout status deploy/ollama-agent --timeout=20m >/dev/null && echo AGENT_MODEL_ON_GPU
-R=registry.ic.local:5000
 # the laptop manifests, pointed at the GPU node's model servers and the session registry
 sed -e "s#image: ic/assistant:1.0.0#image: $R/ic/assistant:1.0.0#" -e 's#http://host.k3d.internal:11434"#http://ollama-chat.ai.svc:11434"#' -e 's#"qwen3:1.7b"#"qwen3:4b-q4_K_M"#' cluster/k8s/shop.yaml | kubectl apply -f - >/dev/null
 kubectl create namespace load --dry-run=client -o yaml | kubectl apply -f - >/dev/null
@@ -136,9 +140,9 @@ kubectl -n load create configmap locustfile --from-file=cluster/load/locustfile.
 kubectl -n load create configmap traces --from-file=cluster/load/traces/ --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n load create configmap replay-logs --from-file=cluster/load/logs/ --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n load create configmap attack-payloads --from-file=cluster/load/attacks/payloads.json --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-for d in shop/juice-shop shop/assistant chaos/chaos agent/opa agent/ic-agent ai/ollama-chat; do kubectl -n ${d%/*} rollout status deploy/${d#*/} --timeout=15m >/dev/null; done
+for d in shop/juice-shop shop/assistant chaos/chaos agent/opa agent/ic-agent ai/ollama-chat pulse/postgres pulse/redis pulse/collector pulse/worker pulse/api; do kubectl -n ${d%/*} rollout status deploy/${d#*/} --timeout=15m >/dev/null; done
 echo DEPLOY_DONE
-kubectl get pods -A -o wide --no-headers | awk '$1 ~ /shop|ai|agent|chaos|monitoring/ {print $1, $2, $4, $8}'
+kubectl get pods -A -o wide --no-headers | awk '$1 ~ /shop|ai|agent|chaos|monitoring|pulse/ {print $1, $2, $4, $8}'
 DEPLOY
   detached 3000 "$TMP/deploy.sh"
   ;;

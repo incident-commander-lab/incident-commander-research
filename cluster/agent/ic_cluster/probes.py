@@ -26,8 +26,11 @@ from ic.bench.probes import ProbeInstance, ProbeTemplate
 PROM = os.environ.get("PROMETHEUS_URL", "http://prometheus-server.monitoring.svc")
 KUBECTL = os.environ.get("KUBECTL", "kubectl")
 
+# which applications this agent watches: shop (Juice Shop + AI assistant) and/or pulse (testbed/ in the cluster)
+APPS = [a.strip() for a in os.environ.get("APPS", "shop").split(",") if a.strip()]
 # service -> namespace, and the ingress service name Traefik reports for it
-NAMESPACE = {"juice-shop": "shop", "assistant": "shop"}
+NAMESPACE = {"juice-shop": "shop", "assistant": "shop",
+             "collector": "pulse", "worker": "pulse", "api": "pulse", "redis": "pulse", "postgres": "pulse"}
 INGRESS = {"juice-shop": "shop-juice-shop-3000@kubernetes", "assistant": "shop-assistant-8000@kubernetes"}
 USES_GPU = {"assistant"}
 # "slow" thresholds per service: shop pages should answer in well under a second; the assistant is an
@@ -232,12 +235,87 @@ _METRIC = {
                                 f"{int(ATTACK_SHARE * 100)}% of that client's requests)", _read_attack, _lbl_attack, eps=0.1, cost=2.0),
 }
 
+# Pulse's own checks (testbed_ops/probes.py), read from Prometheus or the pod as in Compose
+_PULSE_THROUGHPUT = {"collector": "sum(rate(pulse_events_enqueued_total[45s]))",
+                     "worker": "sum(rate(pulse_events_processed_total[45s]))"}
+
+
+def _read_throughput(s):
+    return json.dumps({"rate_per_s": prom(_PULSE_THROUGHPUT[s])})
+
+
+def _lbl_throughput(out, _s):
+    r = json.loads(out)["rate_per_s"]
+    return "flowing" if r and r > 0.5 else "stalled"
+
+
+def _read_source(_s):
+    return json.dumps({"connected": prom("max(pulse_source_connected)"),
+                       "reconnects_10m": prom("sum(increase(pulse_source_reconnects_total[10m]))")})
+
+
+def _lbl_source(out, _s):
+    v = json.loads(out)["connected"]
+    return None if v is None else ("connected" if v >= 1 else "disconnected")
+
+
+def _read_lag(_s):
+    return json.dumps({"lag": prom("max(pulse_stream_lag)"), "pending": prom("max(pulse_stream_pending)")})
+
+
+def _lbl_lag(out, _s):
+    return "growing" if (json.loads(out)["lag"] or 0) > 1000 else "ok"
+
+
+def _read_redis_mem(_s):
+    out = _sh(f"{KUBECTL} exec -n pulse deploy/redis -- redis-cli info memory")
+    kv = dict(l.split(":", 1) for l in out.splitlines() if ":" in l)
+    return json.dumps({"used": int(kv.get("used_memory", "0").strip() or 0), "max": int(kv.get("maxmemory", "0").strip() or 0)})
+
+
+def _lbl_redis_mem(out, _s):
+    m = json.loads(out)
+    return "full" if m["max"] and m["used"] / m["max"] > 0.9 else "ok"
+
+
+def _read_db_locks(_s):
+    n = _sh(f"{KUBECTL} exec -n pulse deploy/postgres -- psql -U pulse -d pulse -tAc "
+            "\"SELECT count(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock' AND datname = current_database()\"")
+    return json.dumps({"sessions_waiting_on_locks": int(n.strip().splitlines()[-1])})
+
+
+def _lbl_db_locks(out, _s):
+    return "blocked" if json.loads(out)["sessions_waiting_on_locks"] > 0 else "clear"
+
+
+_METRIC.update({
+    "throughput": _metric("throughput", ("stalled", "flowing"), "Events per second this stage passed on in the last 45 s",
+                          _read_throughput, _lbl_throughput),
+    "source_connected": _metric("source_connected", ("disconnected", "connected"),
+                                "Is the collector connected to the Wikimedia stream", _read_source, _lbl_source),
+    "stream_lag": _metric("stream_lag", ("growing", "ok"), "Events waiting in the Redis stream for the worker",
+                          _read_lag, _lbl_lag),
+    "redis_memory": _metric("redis_memory", ("full", "ok"), "Redis used memory vs maxmemory", _read_redis_mem, _lbl_redis_mem),
+    "db_locks": _metric("db_locks", ("blocked", "clear"), "Postgres sessions waiting on locks", _read_db_locks, _lbl_db_locks),
+})
+
 KUBE = list(bench.TEMPLATES)                       # pod_health, deployment_ready, endpoints, service_ports, event_reason, log_signature
-APPLIES = {
-    "juice-shop": KUBE + ["cpu_saturation", "memory_pressure", "latency", "error_rate", "recent_change", "attack_signature"],
-    "assistant": KUBE + ["cpu_saturation", "memory_pressure", "latency", "error_rate", "recent_change",
-                         "queue_depth", "gpu_memory", "gpu_util"],
+NO_SERVICE = ["pod_health", "deployment_ready", "event_reason", "log_signature"]   # pods with no Service object
+_APPLIES = {
+    "shop": {
+        "juice-shop": KUBE + ["cpu_saturation", "memory_pressure", "latency", "error_rate", "recent_change", "attack_signature"],
+        "assistant": KUBE + ["cpu_saturation", "memory_pressure", "latency", "error_rate", "recent_change",
+                             "queue_depth", "gpu_memory", "gpu_util"],
+    },
+    "pulse": {
+        "collector": NO_SERVICE + ["cpu_saturation", "memory_pressure", "throughput", "recent_change", "source_connected"],
+        "worker": NO_SERVICE + ["cpu_saturation", "memory_pressure", "throughput", "recent_change", "stream_lag"],
+        "api": KUBE + ["recent_change"],
+        "redis": KUBE + ["memory_pressure", "redis_memory"],
+        "postgres": KUBE + ["memory_pressure", "db_locks"],
+    },
 }
+APPLIES = {svc: checks for app in APPS for svc, checks in _APPLIES[app].items()}
 TEMPLATES = {**bench.TEMPLATES, **{n: t for n, (t, _) in _METRIC.items()}}
 
 

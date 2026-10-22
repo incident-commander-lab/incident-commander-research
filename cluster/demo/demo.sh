@@ -6,12 +6,15 @@
 #                                         one day per hour, repeated for <hours> (default 3), 60 users at peak
 #   cluster/demo/demo.sh replay [scale] [hours]  replay NASA's busiest 1995 day (launch-day surge), one day per
 #                                         hour, on top of the users; scale 4 = ~27 req/s at the peak
-#   cluster/demo/demo.sh inject <fault>   cpu_saturation_shop | memory_leak_assistant | gpu_memory_exhausted | attack_burst | assistant_bad_url
+#   cluster/demo/demo.sh inject <fault>   shop: cpu_saturation_shop | memory_leak_assistant | gpu_memory_exhausted | attack_burst |
+#                                         assistant_bad_url; Pulse: bad_release_worker | crash_loop_worker | bad_config_collector |
+#                                         db_lock | redis_oom | worker_hung | collector_hung | api_down | upstream_cut
 #   cluster/demo/demo.sh heal             end the active fault now
 #   cluster/demo/demo.sh feed [n]         the agent's last n messages (default 3)
 #   cluster/demo/demo.sh approve <id>     approve an escalated incident's proposed fix (the human in the loop)
 #   cluster/demo/demo.sh act | shadow     agent autonomy: act (fixes) or shadow (only says what it would do)
 #   cluster/demo/demo.sh kind rule|llm    which agent decides: the frozen rule or the plain LLM agent (RQ3 setup 2)
+#   cluster/demo/demo.sh apps shop|shop,pulse  what the agent watches (Pulse faults need shop,pulse)
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
@@ -53,5 +56,9 @@ kind)
   K2=${2:?rule or llm}; [ "$K2" = rule ] || [ "$K2" = llm ] || { echo "kind must be rule or llm"; exit 1; }
   ops "kubectl -n agent set env deploy/ic-agent AGENT_KIND=$K2 >/dev/null && kubectl -n agent rollout status deploy/ic-agent --timeout=3m >/dev/null && echo 'agent: $K2'" 300
   ;;
-*) sed -n 2,15p "$0"; exit 1 ;;
+apps)
+  A=${2:?shop or shop,pulse}
+  ops "kubectl -n agent set env deploy/ic-agent APPS=$A >/dev/null && kubectl -n agent rollout status deploy/ic-agent --timeout=3m >/dev/null && echo 'agent watches: $A'" 300
+  ;;
+*) sed -n 2,17p "$0"; exit 1 ;;
 esac

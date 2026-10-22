@@ -55,7 +55,8 @@ def test_metric_labels():
     assert P._lbl_change(json.dumps({"revisions": [[1, "2026-10-18T09:50:00Z"]], "now": now}), "x") == "unchanged"
     assert P._lbl_change(json.dumps({"revisions": [[3, "2026-10-18T08:00:00Z"]], "now": now}), "x") == "unchanged"
     for name, t in P.TEMPLATES.items():   # the rule relies on the last outcome being the healthy one
-        assert t.outcomes[-1] in ("healthy", "ready", "has_endpoints", "ports_ok", "none", "clean", "ok", "unchanged"), name
+        assert t.outcomes[-1] in ("healthy", "ready", "has_endpoints", "ports_ok", "none", "clean", "ok", "unchanged",
+                                  "flowing", "connected", "clear"), name   # Pulse names, as in Compose
 
 
 def test_assistant_dead_model_address_reads_as_connection_errors():
@@ -133,3 +134,44 @@ def test_block_client_needs_an_identified_attacker_and_a_human(monkeypatch):
     assert deleted and deleted[0][:2] == ("delete", "ingressroute.traefik.io")
     policy = open(os.path.join(ROOT, "cluster/agent/policy.rego")).read()
     assert 'input.action == "block_client"' in policy and "not input.approved" in policy
+
+
+def _agent_view(apps: str) -> dict:
+    """What the agent knows under APPS=<apps> (module-level settings, so in a fresh interpreter)."""
+    import subprocess
+    code = ("import json; from ic_cluster import agent as A, actions, probes; "
+            "print(json.dumps({'platform': A.PLATFORM, 'services': list(probes.APPLIES), "
+            "'remedies': sorted(actions.CATALOG), 'checks': sorted(probes.instances())}))")
+    env = {**os.environ, "APPS": apps, "PYTHONPATH": os.pathsep.join([os.path.join(ROOT, "cluster", "agent"), ROOT])}
+    return json.loads(subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True).stdout)
+
+
+def test_shop_only_agent_is_unchanged_by_pulse():
+    v = _agent_view("shop")
+    assert v["services"] == ["juice-shop", "assistant"]
+    assert v["platform"].startswith("a web\nshop running on Kubernetes") and "pulse" not in v["platform"].lower()
+    assert not any(r.endswith((":worker", ":collector", ":api", ":postgres", ":redis")) for r in v["remedies"])
+
+
+def test_pulse_in_the_cluster_has_its_checks_and_fixes():
+    v = _agent_view("shop,pulse")
+    assert v["services"] == ["juice-shop", "assistant", "collector", "worker", "api", "redis", "postgres"]
+    for r in ("rollout_undo:worker", "rollout_undo:collector", "restart:worker", "restart:collector", "scale_out:api",
+              "kill_blocking_sessions:postgres", "restore_redis_maxmemory:redis", "block_client"):
+        assert r in v["remedies"], r
+    for c in ("throughput:worker", "stream_lag:worker", "source_connected:collector", "db_locks:postgres",
+              "redis_memory:redis", "endpoints:api", "log_signature:worker"):
+        assert c in v["checks"], c
+    assert "endpoints:worker" not in v["checks"]          # no Service object: the check would always say "none"
+    assert "data pipeline" in v["platform"] and "web\nshop" in v["platform"]
+    policy = open(os.path.join(ROOT, "cluster/agent/policy.rego")).read()
+    assert all(f'"{r}"' in policy for r in v["remedies"] if r != "none")
+
+
+def test_every_pulse_fault_has_a_fix_the_agent_can_take():
+    import ast
+    src = open(os.path.join(ROOT, "cluster/chaos/chaos.py")).read()
+    faults = ast.literal_eval(src[src.index("FAULTS = {") + len("FAULTS = "):src.index("\n}\n", src.index("FAULTS = {")) + 2])
+    remedies = _agent_view("shop,pulse")["remedies"]
+    for f, (svc, remedy, also) in faults.items():
+        assert remedy in remedies, (f, remedy)

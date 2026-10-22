@@ -9,6 +9,9 @@ import rego.v1
 allowlist := {
 	"scale_out:juice-shop", "scale_in:juice-shop", "rollout_undo:juice-shop", "rollout_undo:assistant",
 	"rate_limit:assistant", "restart:juice-shop", "restart:assistant", "block_client",
+	# Pulse in the cluster (same rules as testbed/policy/testbed.rego)
+	"rollout_undo:worker", "rollout_undo:collector", "restart:worker", "restart:collector", "restart:api",
+	"scale_out:api", "kill_blocking_sessions:postgres", "restore_redis_maxmemory:redis",
 }
 
 reasons contains "action not on the allowlist" if not input.action in allowlist

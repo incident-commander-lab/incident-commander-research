@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from kubernetes import client, config
+from kubernetes.stream import stream
 
 SEALED = Path(os.environ.get("SEALED_DIR", "/sealed"))
 STATE = SEALED / "active.json"
@@ -39,7 +40,26 @@ FAULTS = {
     "assistant_bad_url": ("assistant", "rollout_undo:assistant", []),
     # security (week 2): one client replays attack payloads -> escalate and propose block_client (needs a human)
     "attack_burst": ("juice-shop", "block_client", []),
+    # Pulse (testbed/) in the cluster, week 2. The five original faults were seen in the Compose
+    # shakedowns; the four added 15 Oct are held out (testbed_ops/chaos.py). Fixes in cluster terms.
+    "bad_release_worker": ("worker", "rollout_undo:worker", []),
+    "crash_loop_worker": ("worker", "rollout_undo:worker", []),
+    "bad_config_collector": ("collector", "rollout_undo:collector", []),
+    "db_lock": ("postgres", "kill_blocking_sessions:postgres", []),
+    "redis_oom": ("redis", "restore_redis_maxmemory:redis", []),
+    "worker_hung": ("worker", "restart:worker", []),
+    "collector_hung": ("collector", "restart:collector", []),
+    "api_down": ("api", "scale_out:api", []),          # Compose: container stopped; here: scaled to 0
+    "upstream_cut": ("collector", "none", []),         # the internet path is gone: nothing of ours to fix
 }
+NS = {"juice-shop": "shop", "assistant": "shop", "collector": "pulse", "worker": "pulse", "api": "pulse",
+      "redis": "pulse", "postgres": "pulse", "egress": "pulse"}
+PULSE_BAD = {"bad_release_worker": {"DELTA_COLUMN": "deltas"}, "crash_loop_worker": {"BATCH_SIZE": "0"},
+             "bad_config_collector": {"WIKIMEDIA_URL": "https://stream.wikimedia.org/v2/stream/recentchanges"}}
+HUNG = {"worker_hung": "worker", "collector_hung": "collector"}
+PG_DSN = os.environ.get("PULSE_PG", "postgresql://pulse:pulse@postgres.pulse.svc:5432/pulse")
+REDIS = os.environ.get("PULSE_REDIS", "redis://redis.pulse.svc:6379")
+REDIS_BASELINE = 256 * 1024 * 1024
 SEEN = {"assistant_bad_url"}   # used to shake the agent down; never scored as held-out
 BASE = {"NUM_CTX": "2048", "MAX_CONCURRENCY": "4", "RETAIN_ANSWERS": "false"}
 
@@ -47,7 +67,7 @@ if os.environ.get("KUBERNETES_SERVICE_HOST"):
     config.load_incluster_config()
 else:
     config.load_kube_config()
-apps, batch, crd = client.AppsV1Api(), client.BatchV1Api(), client.CustomObjectsApi()
+apps, batch, crd, core = client.AppsV1Api(), client.BatchV1Api(), client.CustomObjectsApi(), client.CoreV1Api()
 
 
 def now() -> str:
@@ -65,19 +85,61 @@ def _active():
 
 
 def _env(deploy: str) -> dict:
-    d = apps.read_namespaced_deployment(deploy, "shop")
+    d = apps.read_namespaced_deployment(deploy, NS[deploy])
     return {e.name: e.value for e in d.spec.template.spec.containers[0].env or []}
 
 
 def _release(deploy: str, changes: dict, reason: str):
     """A rollout, as the pipeline would do it: new env values, version bump, change-cause."""
     env = _env(deploy)
-    major, minor, *_ = (env.get("ASSISTANT_VERSION", "1.0.0").split(".") + ["0", "0"])[:3]
-    changes = {"ASSISTANT_VERSION": f"{major}.{int(minor) + 1}.0", **changes}
+    vkey = "ASSISTANT_VERSION" if deploy == "assistant" else "RELEASE_VERSION"
+    major, minor, *_ = (env.get(vkey, "1.0.0").split(".") + ["0", "0"])[:3]
+    changes = {vkey: f"{major}.{int(minor) + 1}.0", **changes}
     patch = {"metadata": {"annotations": {"kubernetes.io/change-cause": f"{PIPELINE}: {reason}"}},
              "spec": {"template": {"spec": {"containers": [
                  {"name": deploy, "env": [{"name": k, "value": v} for k, v in changes.items()]}]}}}}
-    apps.patch_namespaced_deployment(deploy, "shop", patch)
+    apps.patch_namespaced_deployment(deploy, NS[deploy], patch)
+
+
+def _scale(deploy: str, n: int):
+    apps.patch_namespaced_deployment_scale(deploy, NS[deploy], {"spec": {"replicas": n}})
+
+
+def _replicas(deploy: str) -> int:
+    return apps.read_namespaced_deployment(deploy, NS[deploy]).spec.replicas or 0
+
+
+def _pod(deploy: str) -> str:
+    pods = core.list_namespaced_pod(NS[deploy], label_selector=f"app={deploy}").items
+    running = [p for p in pods if p.status.phase == "Running" and not p.metadata.deletion_timestamp]
+    return running[0].metadata.name if running else ""
+
+
+def _freeze(deploy: str) -> str:
+    """Stop the app process in its pod (SIGSTOP): the pod still looks Running, nothing gets done."""
+    pod = _pod(deploy)
+    stream(core.connect_get_namespaced_pod_exec, pod, NS[deploy], container=deploy,
+           command=["sh", "-c", f"pkill -STOP -f 'node src/{deploy}.js'"], stderr=True, stdout=True, stdin=False, tty=False)
+    return pod
+
+
+def _db_lock_job():
+    """An ad-hoc 'maintenance' job that takes an exclusive table lock and never commits."""
+    sql = "SET application_name='maintenance-reindex'; BEGIN; LOCK TABLE edits IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(86400);"
+    job = client.V1Job(
+        metadata=client.V1ObjectMeta(name="maintenance-reindex", namespace="pulse"),
+        spec=client.V1JobSpec(backoff_limit=0, ttl_seconds_after_finished=600, template=client.V1PodTemplateSpec(
+            spec=client.V1PodSpec(restart_policy="Never", node_selector={"role": "ops"}, containers=[client.V1Container(
+                name="psql", image="postgres:16-alpine", command=["psql", PG_DSN.replace("postgres.pulse.svc", "postgres"),
+                                                                  "-v", "ON_ERROR_STOP=1", "-c", sql],
+                resources=client.V1ResourceRequirements(requests={"cpu": "10m", "memory": "16Mi"}, limits={"memory": "64Mi"}))]))))
+    batch.create_namespaced_job("pulse", job)
+
+
+def _pg_lock_sessions() -> int:
+    import psycopg
+    with psycopg.connect(PG_DSN, autocommit=True) as c:
+        return c.execute("SELECT count(*) FROM pg_stat_activity WHERE application_name='maintenance-reindex'").fetchone()[0]
 
 
 def _surge(minutes: float):
@@ -134,6 +196,22 @@ def inject(fault: str) -> dict:
     elif fault == "assistant_bad_url":
         restore = {"OLLAMA_URL": _env("assistant")["OLLAMA_URL"]}
         _release("assistant", {"OLLAMA_URL": "http://model-gateway.ai.svc:11434"}, "routine release (model gateway)")
+    elif fault in PULSE_BAD:
+        restore = {k: _env(service).get(k, "") for k in PULSE_BAD[fault]}
+        _release(service, PULSE_BAD[fault], "routine release")
+    elif fault == "db_lock":
+        _db_lock_job()
+    elif fault == "redis_oom":
+        import redis
+        redis.from_url(REDIS).config_set("maxmemory", "1mb")
+    elif fault in HUNG:
+        restore = {"frozen_pod": _freeze(service)}
+    elif fault == "api_down":
+        restore = {"replicas": _replicas("api")}
+        _scale("api", 0)
+    elif fault == "upstream_cut":
+        restore = {"replicas": _replicas("egress")}
+        _scale("egress", 0)
     record = {"fault_id": fid, "fault": fault, "service": service, "correct_remedy": remedy, "also_correct": also}
     STATE.write_text(json.dumps({**record, "started": now(), **({"restore": restore} if restore else {})}))
     _seal({"event": "inject", **record})
@@ -146,6 +224,23 @@ def is_resolved(fault: str) -> bool:
             return (apps.read_namespaced_deployment("juice-shop", "shop").spec.replicas or 1) >= 2
         if fault == "attack_burst":   # a new block since the burst began (who is blocked is in the incident file)
             return _blocks() > (_active() or {}).get("restore", {}).get("blocks_before", 0)
+        if fault in ("bad_release_worker", "crash_loop_worker"):
+            e = _env("worker")
+            return e.get("DELTA_COLUMN", "delta") == "delta" and e.get("BATCH_SIZE", "200") != "0"
+        if fault == "bad_config_collector":
+            return "recentchanges" not in _env("collector").get("WIKIMEDIA_URL", "")
+        if fault == "db_lock":
+            return _pg_lock_sessions() == 0
+        if fault == "redis_oom":
+            import redis
+            return int(redis.from_url(REDIS).config_get("maxmemory")["maxmemory"]) != 1024 * 1024
+        if fault in HUNG:            # restarted: the frozen pod is gone and a fresh one runs
+            frozen = (_active() or {}).get("restore", {}).get("frozen_pod")
+            return bool(_pod(HUNG[fault])) and _pod(HUNG[fault]) != frozen
+        if fault == "api_down":
+            return _replicas("api") >= 1
+        if fault == "upstream_cut":
+            return _replicas("egress") >= 1
         env = _env("assistant")
         if fault == "memory_leak_assistant":
             return env.get("RETAIN_ANSWERS", "false") != "true"
@@ -173,6 +268,29 @@ def heal(reason: str = "manual") -> dict | None:
             pass
     elif not already and fault == "assistant_bad_url":
         _release("assistant", a["restore"], "release reverted")
+    elif fault in PULSE_BAD:
+        if not already:
+            _release(FAULTS[fault][0], a["restore"], "release reverted")
+    elif fault == "db_lock":
+        if not already:
+            import psycopg
+            with psycopg.connect(PG_DSN, autocommit=True) as c:
+                c.execute("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name='maintenance-reindex'")
+        try:
+            batch.delete_namespaced_job("maintenance-reindex", "pulse", propagation_policy="Background")
+        except client.ApiException:
+            pass
+    elif fault == "redis_oom":
+        if not already:
+            import redis
+            redis.from_url(REDIS).config_set("maxmemory", str(REDIS_BASELINE))
+    elif fault in HUNG:
+        if not already:
+            apps.patch_namespaced_deployment(HUNG[fault], "pulse", {"spec": {"template": {"metadata": {"annotations": {
+                "kubectl.kubernetes.io/restartedAt": now()}}}}})
+    elif fault in ("api_down", "upstream_cut"):
+        if not already:
+            _scale("api" if fault == "api_down" else "egress", max(1, a["restore"]["replicas"]))
     elif not already:
         _release("assistant", dict(BASE), "release reverted")
     _seal({"event": "end", "fault_id": a["fault_id"], "fault": fault,
