@@ -4,6 +4,8 @@
 #
 #   cluster/demo/demo.sh load [hours]     traffic for the whole showing: German Wikipedia's daily cycle,
 #                                         one day per hour, repeated for <hours> (default 3), 60 users at peak
+#   cluster/demo/demo.sh replay [scale] [hours]  replay NASA's busiest 1995 day (launch-day surge), one day per
+#                                         hour, on top of the users; scale 4 = ~27 req/s at the peak
 #   cluster/demo/demo.sh inject <fault>   cpu_saturation_shop | memory_leak_assistant | gpu_memory_exhausted | assistant_bad_url
 #   cluster/demo/demo.sh heal             end the active fault now
 #   cluster/demo/demo.sh feed [n]         the agent's last n messages (default 3)
@@ -21,6 +23,11 @@ load)
   H=${2:-3}; TH=$((H * 24)); M=$((H * 60 + 5))
   ops "kubectl -n load delete job --all >/dev/null 2>&1
 sed -e 's/NAME/showing/' -e 's/\"USERS\"/\"60\"/g' -e 's/MINUTESm/${M}m/' -e 's|\"TRACE\"|\"/traces/wikipedia-de-hourly-2026-09-28.json\"|' -e 's/\"TRACEHOURS\"/\"$TH\"/' cluster/load/job.yaml | kubectl apply -f - >/dev/null && echo 'traffic on for $H h ($TH trace hours, 60 users at peak)'"
+  ;;
+replay)
+  S=${2:-4}; H=${3:-1}; MIN=$((H * 1440))
+  ops "kubectl -n load delete job logreplay --ignore-not-found >/dev/null
+sed -e 's/NAME/logreplay/' -e 's/MODEVALUE/log/' -e 's/SCALEVALUE/$S/' -e 's/MINUTESVALUE/$MIN/' -e 's#image: ic/replay:1.0.0#image: registry.ic.local:5000/ic/replay:1.0.0#' cluster/load/replay-job.yaml | kubectl apply -f - >/dev/null && echo 'log replay on: NASA KSC 13 Jul 1995, x$S, $H h'"
   ;;
 inject)
   F=${2:?fault name}
@@ -46,5 +53,5 @@ kind)
   K2=${2:?rule or llm}; [ "$K2" = rule ] || [ "$K2" = llm ] || { echo "kind must be rule or llm"; exit 1; }
   ops "kubectl -n agent set env deploy/ic-agent AGENT_KIND=$K2 >/dev/null && kubectl -n agent rollout status deploy/ic-agent --timeout=3m >/dev/null && echo 'agent: $K2'" 300
   ;;
-*) sed -n 2,13p "$0"; exit 1 ;;
+*) sed -n 2,15p "$0"; exit 1 ;;
 esac

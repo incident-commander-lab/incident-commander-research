@@ -108,7 +108,7 @@ deploy)
   cat > "$TMP/deploy.sh" <<'DEPLOY'
 set -e
 cd /root/ic; export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-for img in "assistant cluster/assistant" "chaos cluster/chaos"; do set -- $img
+for img in "assistant cluster/assistant" "chaos cluster/chaos" "replay cluster/load/replay"; do set -- $img
   docker build -q -t localhost:5000/ic/$1:1.0.0 $2 >/dev/null && docker push -q localhost:5000/ic/$1:1.0.0 >/dev/null; done
 docker build -q -f cluster/agent/Dockerfile -t localhost:5000/ic/cluster-agent:1.0.0 . >/dev/null && docker push -q localhost:5000/ic/cluster-agent:1.0.0 >/dev/null
 echo IMAGES_OK
@@ -133,6 +133,7 @@ kubectl -n agent create configmap opa-policy --from-file=policy.rego=cluster/age
 sed -e "s#image: ic/cluster-agent:1.0.0#image: $R/ic/cluster-agent:1.0.0#" -e 's#http://host.k3d.internal:11434/v1#http://ollama-agent.ai.svc:11434/v1#' cluster/k8s/agent.yaml | kubectl apply -f - >/dev/null
 kubectl -n load create configmap locustfile --from-file=cluster/load/locustfile.py --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n load create configmap traces --from-file=cluster/load/traces/ --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n load create configmap replay-logs --from-file=cluster/load/logs/ --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 for d in shop/juice-shop shop/assistant chaos/chaos agent/opa agent/ic-agent ai/ollama-chat; do kubectl -n ${d%/*} rollout status deploy/${d#*/} --timeout=15m >/dev/null; done
 echo DEPLOY_DONE
 kubectl get pods -A -o wide --no-headers | awk '$1 ~ /shop|ai|agent|chaos|monitoring/ {print $1, $2, $4, $8}'
