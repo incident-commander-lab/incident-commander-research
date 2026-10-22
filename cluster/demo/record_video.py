@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import html
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,7 @@ BROWSER = os.environ.get("BROWSER", "/Applications/Brave Browser.app/Contents/Ma
 FRAME_S = float(os.environ.get("FRAME_S", "10"))
 SWITCH_S = 120   # alternate the two dashboards every 2 min
 DASHES = ["ic-shop", "ic-cluster"]
-URL = "http://localhost:3401/d/{uid}?orgId=1&kiosk&refresh=10s&from=now-20m&to=now"
+URL = "http://localhost:3401/d/{uid}?orgId=1&kiosk&refresh=10s&from=now-20m&to=now&timezone=utc"
 
 feed = {"phase": "starting", "agent": ""}
 
@@ -46,7 +47,8 @@ def poll_forever():
                                  text=True, timeout=90).stdout.replace("\r", "")
             phase, _, outbox = out.partition("===")
             feed["phase"] = phase.strip().splitlines()[-1] if phase.strip() else feed["phase"]
-            msgs = [m.strip() for m in outbox.strip().split("\n\n") if m.strip()]
+            # one message per timestamped line (gpu.sh drops blank lines, so they cannot separate them)
+            msgs = [m.strip() for m in re.split(r"\n(?=\d{4}-\d\d-\d\dT)", outbox.strip()) if m.strip()]
             if msgs:
                 feed["agent"] = "\n".join(msgs[-1].splitlines()[:4])[:420]
         except Exception as e:   # a missed poll keeps the last text

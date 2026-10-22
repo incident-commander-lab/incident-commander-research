@@ -1,0 +1,10 @@
+{"ts": "2026-10-22T05:33:21+00:00", "event": "inject", "fault_id": "64496fdd", "fault": "cpu_saturation_shop", "service": "juice-shop", "correct_remedy": "scale_out:juice-shop", "also_correct": []}
+{"ts": "2026-10-22T05:48:35+00:00", "event": "end", "fault_id": "64496fdd", "fault": "cpu_saturation_shop", "ended_by": "timeout"}
+{"ts": "2026-10-22T05:53:04+00:00", "event": "inject", "fault_id": "a36912f5", "fault": "memory_leak_assistant", "service": "assistant", "correct_remedy": "rollout_undo:assistant", "also_correct": []}
+{"ts": "2026-10-22T06:04:20+00:00", "event": "resolved", "fault_id": "a36912f5", "fault": "memory_leak_assistant", "minutes": 11.3}
+{"ts": "2026-10-22T06:04:20+00:00", "event": "end", "fault_id": "a36912f5", "fault": "memory_leak_assistant", "ended_by": "fixed_before_injector_heal"}
+{"ts": "2026-10-22T06:08:47+00:00", "event": "inject", "fault_id": "a8363087", "fault": "gpu_memory_exhausted", "service": "assistant", "correct_remedy": "rollout_undo:assistant", "also_correct": ["rate_limit:assistant"]}
+{"ts": "2026-10-22T06:22:06+00:00", "event": "resolved", "fault_id": "a8363087", "fault": "gpu_memory_exhausted", "minutes": 13.3}
+{"ts": "2026-10-22T06:22:06+00:00", "event": "end", "fault_id": "a8363087", "fault": "gpu_memory_exhausted", "ended_by": "fixed_before_injector_heal"}
+{"ts": "2026-10-22T06:26:30+00:00", "event": "inject", "fault_id": "0acb3063", "fault": "assistant_bad_url", "service": "assistant", "correct_remedy": "rollout_undo:assistant", "also_correct": []}
+{"ts": "2026-10-22T06:41:37+00:00", "event": "end", "fault_id": "0acb3063", "fault": "assistant_bad_url", "ended_by": "timeout"}
