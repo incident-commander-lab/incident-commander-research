@@ -121,19 +121,21 @@ helm upgrade --install prometheus prometheus-community/prometheus --version 29.3
 helm upgrade --install grafana grafana/grafana --version 10.5.15 -n monitoring -f cluster/monitoring/grafana-values.yaml --wait --timeout 10m >/dev/null && echo MONITORING_OK
 for f in cluster/monitoring/dashboards/*.json; do n=$(basename $f .json)
   kubectl -n monitoring create configmap dash-$n --from-file=$n.json=$f --dry-run=client -o yaml | kubectl label --local -f - grafana_dashboard=1 -o yaml | kubectl apply -f - >/dev/null; done
+kubectl apply -f cluster/k8s/traefik-access-log.yaml >/dev/null   # the attack_signature check reads it
 kubectl apply -f cluster/k8s/ai.yaml >/dev/null
 kubectl -n ai rollout status deploy/ollama-agent --timeout=20m >/dev/null && echo AGENT_MODEL_ON_GPU
 R=registry.ic.local:5000
 # the laptop manifests, pointed at the GPU node's model servers and the session registry
 sed -e "s#image: ic/assistant:1.0.0#image: $R/ic/assistant:1.0.0#" -e 's#http://host.k3d.internal:11434"#http://ollama-chat.ai.svc:11434"#' -e 's#"qwen3:1.7b"#"qwen3:4b-q4_K_M"#' cluster/k8s/shop.yaml | kubectl apply -f - >/dev/null
 kubectl create namespace load --dry-run=client -o yaml | kubectl apply -f - >/dev/null
-sed -e "s#image: ic/chaos:1.0.0#image: $R/ic/chaos:1.0.0#" -e 's#value: "16384"#value: "40960"#' cluster/k8s/chaos.yaml | kubectl apply -f - >/dev/null
+sed -e "s#image: ic/chaos:1.0.0#image: $R/ic/chaos:1.0.0#" -e 's#value: "16384"#value: "40960"#' -e "s#value: \"ic/replay:1.0.0\"#value: \"$R/ic/replay:1.0.0\"#" cluster/k8s/chaos.yaml | kubectl apply -f - >/dev/null
 kubectl create namespace agent --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n agent create configmap opa-policy --from-file=policy.rego=cluster/agent/policy.rego --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 sed -e "s#image: ic/cluster-agent:1.0.0#image: $R/ic/cluster-agent:1.0.0#" -e 's#http://host.k3d.internal:11434/v1#http://ollama-agent.ai.svc:11434/v1#' cluster/k8s/agent.yaml | kubectl apply -f - >/dev/null
 kubectl -n load create configmap locustfile --from-file=cluster/load/locustfile.py --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n load create configmap traces --from-file=cluster/load/traces/ --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 kubectl -n load create configmap replay-logs --from-file=cluster/load/logs/ --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+kubectl -n load create configmap attack-payloads --from-file=cluster/load/attacks/payloads.json --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 for d in shop/juice-shop shop/assistant chaos/chaos agent/opa agent/ic-agent ai/ollama-chat; do kubectl -n ${d%/*} rollout status deploy/${d#*/} --timeout=15m >/dev/null; done
 echo DEPLOY_DONE
 kubectl get pods -A -o wide --no-headers | awk '$1 ~ /shop|ai|agent|chaos|monitoring/ {print $1, $2, $4, $8}'

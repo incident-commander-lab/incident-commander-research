@@ -28,6 +28,9 @@ SCALE = float(os.environ.get("SCALE", "4"))                # request multiplier 
 START_MIN = int(os.environ.get("START_MINUTE", "0"))       # where in the source day to begin
 MINUTES = int(os.environ.get("MINUTES", "1440"))           # how many source minutes to play (wraps around)
 MAX_INFLIGHT = int(os.environ.get("MAX_INFLIGHT", "64"))
+PAYLOADS = os.environ.get("PAYLOADS", "/attacks/payloads.json")
+ATTACK_S = float(os.environ.get("ATTACK_SECONDS", "480"))   # one burst; the injector starts and times it
+ATTACK_RATE = float(os.environ.get("ATTACK_RATE", "8"))      # requests per second from the one attacking client
 WORDS = ["apple", "juice", "lemon", "banana", "melon", "orange", "carrot", "fruit", "green", "eggfruit"]
 
 stats: Counter = Counter()
@@ -74,10 +77,46 @@ async def replay_log(c: httpx.AsyncClient):
         await asyncio.sleep(max(0.0, t0 + (n + 1) * slot - time.monotonic()))
 
 
+def _attack_requests(payloads: dict) -> list[tuple[str, str, dict | None]]:
+    """(method, path, json body) per payload, aimed at the Juice Shop endpoints each attack targets."""
+    from urllib.parse import quote
+    out = []
+    for p in payloads.get("sqli", []):
+        out += [("GET", f"/rest/products/search?q={quote(p)}", None),
+                ("POST", "/rest/user/login", {"email": p, "password": "x"})]
+    out += [("GET", f"/rest/products/search?q={quote(p)}", None) for p in payloads.get("xss", [])]
+    out += [("GET", f"/ftp/{quote(p, safe='')}", None) for p in payloads.get("traversal", [])]
+    out += [("GET", f"/api/Products?name={quote(p)}", None) for p in payloads.get("cmdi", [])]
+    return out
+
+
+async def replay_attack(c: httpx.AsyncClient):
+    reqs = _attack_requests(json.load(open(PAYLOADS))["payloads"])
+    sem = asyncio.Semaphore(MAX_INFLIGHT)
+    t0, n = time.monotonic(), 0
+
+    async def send(method, path, body):
+        async with sem:
+            try:
+                r = await (c.post(path, json=body) if method == "POST" else c.get(path))
+                stats[f"attack {r.status_code // 100}xx"] += 1
+            except httpx.HTTPError as e:
+                stats[f"attack {type(e).__name__}"] += 1
+    while time.monotonic() - t0 < ATTACK_S:
+        asyncio.create_task(send(*random.choice(reqs)))
+        n += 1
+        if n % int(ATTACK_RATE * 60) == 0:
+            print(f"[{time.strftime('%H:%M:%S')}] attack: {dict(stats)}", flush=True)
+        await asyncio.sleep(random.expovariate(ATTACK_RATE))
+
+
 async def main():
     async with httpx.AsyncClient(base_url=HOST, timeout=30) as c:
         if MODE == "log":
             await replay_log(c)
+        elif MODE == "attack":
+            c.headers["User-Agent"] = "Mozilla/5.0 (compatible; scan/1.0)"
+            await replay_attack(c)
         else:
             raise SystemExit(f"unknown MODE {MODE}")
     await asyncio.sleep(5)

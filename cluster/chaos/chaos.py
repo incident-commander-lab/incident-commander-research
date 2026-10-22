@@ -27,6 +27,7 @@ STATE = SEALED / "active.json"
 TIMEOUT_MIN = float(os.environ.get("FAULT_TIMEOUT_MIN", "15"))
 SURGE_USERS = int(os.environ.get("SURGE_USERS", "150"))          # AWS: 2.5 x the trace peak
 GPU_NUM_CTX = os.environ.get("CHAOS_GPU_NUM_CTX", "16384")        # capped locally; AWS: large enough to overflow the L4
+REPLAY_IMAGE = os.environ.get("REPLAY_IMAGE", "ic/replay:1.0.0")
 PIPELINE = "deploy-pipeline"
 
 # fault -> (service at fault, correct response, also accepted)
@@ -36,6 +37,8 @@ FAULTS = {
     "gpu_memory_exhausted": ("assistant", "rollout_undo:assistant", ["rate_limit:assistant"]),
     # shakedown only (SEEN): a release pointing the assistant at a wrong model address -> errors
     "assistant_bad_url": ("assistant", "rollout_undo:assistant", []),
+    # security (week 2): one client replays attack payloads -> escalate and propose block_client (needs a human)
+    "attack_burst": ("juice-shop", "block_client", []),
 }
 SEEN = {"assistant_bad_url"}   # used to shake the agent down; never scored as held-out
 BASE = {"NUM_CTX": "2048", "MAX_CONCURRENCY": "4", "RETAIN_ANSWERS": "false"}
@@ -44,7 +47,7 @@ if os.environ.get("KUBERNETES_SERVICE_HOST"):
     config.load_incluster_config()
 else:
     config.load_kube_config()
-apps, batch = client.AppsV1Api(), client.BatchV1Api()
+apps, batch, crd = client.AppsV1Api(), client.BatchV1Api(), client.CustomObjectsApi()
 
 
 def now() -> str:
@@ -92,6 +95,27 @@ def _surge(minutes: float):
     batch.create_namespaced_job("load", job)
 
 
+def _attack(minutes: float):
+    """One client sending attack payloads at the shop for the fault's lifetime (cluster/load/replay)."""
+    job = client.V1Job(
+        metadata=client.V1ObjectMeta(name="attack", namespace="load"),
+        spec=client.V1JobSpec(backoff_limit=0, ttl_seconds_after_finished=600, template=client.V1PodTemplateSpec(
+            spec=client.V1PodSpec(restart_policy="Never", node_selector={"role": "ops"}, containers=[client.V1Container(
+                name="replay", image=REPLAY_IMAGE,
+                env=[client.V1EnvVar(name="MODE", value="attack"), client.V1EnvVar(name="ATTACK_SECONDS", value=str(int(minutes * 60)))],
+                volume_mounts=[client.V1VolumeMount(name="attacks", mount_path="/attacks")],
+                resources=client.V1ResourceRequirements(requests={"cpu": "50m", "memory": "64Mi"}, limits={"memory": "256Mi"}))],
+                volumes=[client.V1Volume(name="attacks", config_map=client.V1ConfigMapVolumeSource(name="attack-payloads"))]))))
+    batch.create_namespaced_job("load", job)
+
+
+def _blocks() -> int:
+    """Client blocks in place at the ingress (the agent's block_client, after a human approved it)."""
+    r = crd.list_namespaced_custom_object("traefik.io", "v1alpha1", "shop", "ingressroutes",
+                                          label_selector="incident-commander=block")
+    return len(r.get("items", []))
+
+
 def inject(fault: str) -> dict:
     if _active():
         raise RuntimeError(f"a fault is already active: {_active()}")
@@ -100,6 +124,9 @@ def inject(fault: str) -> dict:
     restore: dict = {}
     if fault == "cpu_saturation_shop":
         _surge(TIMEOUT_MIN + 1)
+    elif fault == "attack_burst":
+        restore = {"blocks_before": _blocks()}
+        _attack(TIMEOUT_MIN + 1)
     elif fault == "memory_leak_assistant":
         _release("assistant", {"RETAIN_ANSWERS": "true"}, "routine release (answer cache)")
     elif fault == "gpu_memory_exhausted":
@@ -108,7 +135,7 @@ def inject(fault: str) -> dict:
         restore = {"OLLAMA_URL": _env("assistant")["OLLAMA_URL"]}
         _release("assistant", {"OLLAMA_URL": "http://model-gateway.ai.svc:11434"}, "routine release (model gateway)")
     record = {"fault_id": fid, "fault": fault, "service": service, "correct_remedy": remedy, "also_correct": also}
-    STATE.write_text(json.dumps({**record, "started": now(), **({"restore": restore} if fault == "assistant_bad_url" else {})}))
+    STATE.write_text(json.dumps({**record, "started": now(), **({"restore": restore} if restore else {})}))
     _seal({"event": "inject", **record})
     return record
 
@@ -117,6 +144,8 @@ def is_resolved(fault: str) -> bool:
     try:
         if fault == "cpu_saturation_shop":
             return (apps.read_namespaced_deployment("juice-shop", "shop").spec.replicas or 1) >= 2
+        if fault == "attack_burst":   # a new block since the burst began (who is blocked is in the incident file)
+            return _blocks() > (_active() or {}).get("restore", {}).get("blocks_before", 0)
         env = _env("assistant")
         if fault == "memory_leak_assistant":
             return env.get("RETAIN_ANSWERS", "false") != "true"
@@ -136,9 +165,10 @@ def heal(reason: str = "manual") -> dict | None:
     if not a:
         return None
     fault, already = a["fault"], is_resolved(a["fault"])
-    if fault == "cpu_saturation_shop":   # the surge ends either way; a scale-out stays (the agent's change)
+    if fault in ("cpu_saturation_shop", "attack_burst"):   # the load ends either way; the agent's change stays
         try:
-            batch.delete_namespaced_job("locust-surge", "load", propagation_policy="Background")
+            batch.delete_namespaced_job("locust-surge" if fault == "cpu_saturation_shop" else "attack", "load",
+                                        propagation_policy="Background")
         except client.ApiException:
             pass
     elif not already and fault == "assistant_bad_url":

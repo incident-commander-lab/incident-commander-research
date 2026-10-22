@@ -7,6 +7,7 @@ import json
 import subprocess
 from typing import Callable, Optional
 
+from . import probes
 from .probes import KUBECTL, NAMESPACE
 
 MAX_REPLICAS = 3
@@ -44,6 +45,29 @@ def _env(svc: str) -> dict:
     return {e["name"]: e.get("value") for e in d["spec"]["template"]["spec"]["containers"][0].get("env", [])}
 
 
+def _apply(manifest: dict):
+    r = subprocess.run([KUBECTL, "apply", "-f", "-"], input=json.dumps(manifest), capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        raise RuntimeError(f"kubectl apply: {r.stderr.strip()[:300]}")
+
+
+def _block(ip: str, reason: str) -> Callable[[], None]:
+    """Answer every request from one client address with 403 at the ingress: a Traefik route matching
+    that client (above every other route) through an allow-list that admits nobody."""
+    name = "ic-block-" + ip.replace(".", "-").replace(":", "-")
+    meta = {"namespace": "shop", "labels": {"incident-commander": "block"},
+            "annotations": {"incident-commander/reason": reason[:200]}}
+    image = _k("get", "deploy", "traefik", "-n", "kube-system", "-o", "jsonpath={.spec.template.spec.containers[0].image}")
+    allow = "ipWhiteList" if image.rsplit(":", 1)[-1].lstrip("v").startswith("2.") else "ipAllowList"   # renamed in Traefik 3
+    _apply({"apiVersion": "traefik.io/v1alpha1", "kind": "Middleware", "metadata": {"name": "ic-deny-all", **meta},
+            "spec": {allow: {"sourceRange": ["127.0.0.1/32"]}}})
+    _apply({"apiVersion": "traefik.io/v1alpha1", "kind": "IngressRoute", "metadata": {"name": name, **meta},
+            "spec": {"entryPoints": ["web"], "routes": [{
+                "match": f"ClientIP(`{ip}`)", "kind": "Rule", "priority": 100000,
+                "middlewares": [{"name": "ic-deny-all"}], "services": [{"name": "juice-shop", "port": 3000}]}]}})
+    return lambda: _k("delete", "ingressroute.traefik.io", name, "-n", "shop", "--ignore-not-found")
+
+
 def execute(remedy: str, reason: str) -> Optional[Callable[[], None]]:
     """Run a remedy. Returns a function that undoes it, or None."""
     kind, _, svc = remedy.partition(":")
@@ -71,8 +95,11 @@ def execute(remedy: str, reason: str) -> Optional[Callable[[], None]]:
     if kind == "restart":
         _k("rollout", "restart", "deploy", svc, "-n", ns)
         return None
-    if kind == "block_client":
-        raise RuntimeError("block_client is proposed to a human, never executed by the agent (week 2: ingress deny list)")
+    if kind == "block_client":         # runs only after a human approved it (OPA)
+        ip = probes.LAST_ATTACKER.get("ip")
+        if not ip:
+            raise RuntimeError("no attacking client identified (attack_signature has not read 'attack')")
+        return _block(ip, f"{reason}: {probes.LAST_ATTACKER}")
     if kind == "none":
         return None
     raise ValueError(f"unknown remedy {remedy}")

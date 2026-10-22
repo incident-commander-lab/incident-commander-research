@@ -19,6 +19,7 @@ kind: Role
 metadata: { name: chaos-shop, namespace: shop }
 rules:
   - { apiGroups: [apps], resources: [deployments], verbs: [get, list, patch] }
+  - { apiGroups: [traefik.io], resources: [ingressroutes], verbs: [get, list] }   # attack_burst: is a client blocked?
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -58,6 +59,7 @@ spec:
           env:
             - { name: FAULT_TIMEOUT_MIN, value: "15" }
             - { name: SURGE_USERS, value: "150" }
+            - { name: REPLAY_IMAGE, value: "ic/replay:1.0.0" }   # attack_burst's attacker (cluster/load/replay)
             - { name: CHAOS_GPU_NUM_CTX, value: "16384" }   # local cap; larger on the AWS GPU
             - { name: CHAOS_SEED, value: "0" }
           volumeMounts: [{ name: sealed, mountPath: /sealed }]

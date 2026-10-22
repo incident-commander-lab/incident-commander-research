@@ -183,6 +183,7 @@ _RECOVERY = {  # remedy -> checks that must read healthy afterwards (unreadable 
     "rate_limit:assistant": ["pod_health:assistant", "error_rate:assistant", "gpu_memory:assistant"],
     "restart:juice-shop": ["pod_health:juice-shop", "error_rate:juice-shop"],
     "restart:assistant": ["pod_health:assistant", "error_rate:assistant"],
+    "block_client": ["attack_signature:juice-shop", "error_rate:juice-shop"],
 }
 
 
@@ -300,7 +301,11 @@ def _act(rec: dict, remedy: str, p: float, pr: dict, approved: bool):
                      "approved": approved, "p": p, "threshold": ACT_THRESHOLD})
     rec["policy"] = decision
     if not decision.get("allow"):
-        _notify(f"POLICY DENIED {remedy}: {decision.get('reasons')} - escalating [{rec['id']}]", rec)
+        msg = f"POLICY DENIED {remedy}: {decision.get('reasons')} - escalating [{rec['id']}]"
+        if not approved and all("approval" in r for r in decision.get("reasons", [])):   # a human may still say yes
+            _pending_approval[rec["id"]] = {"remedy": remedy, "rec": rec}
+            msg += f"\nApprove the proposed fix: curl -X POST {APPROVE_URL}/incidents/{rec['id']}/approve"
+        _notify(msg, rec)
         return
     try:
         undo = actions.execute(remedy, reason=f"incident {rec['id']}")

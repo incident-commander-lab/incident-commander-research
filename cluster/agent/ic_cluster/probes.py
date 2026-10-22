@@ -59,8 +59,8 @@ def prom(query: str) -> Optional[float]:
     return sum(float(x["value"][1]) for x in res) if res else None
 
 
-def _metric(name, outcomes, describe, read, label, eps=0.05, miss=None):
-    return ProbeTemplate(name, outcomes, 1.0, describe, call=lambda ns, s, n=name: f"{n}:{s}",
+def _metric(name, outcomes, describe, read, label, eps=0.05, miss=None, cost=1.0):
+    return ProbeTemplate(name, outcomes, cost, describe, call=lambda ns, s, n=name: f"{n}:{s}",
                          label=label, eps=eps, miss=miss), read
 
 
@@ -172,6 +172,44 @@ def _lbl_change(out, _s):
     return "changed" if rev > 1 and age < 1800 else "unchanged"
 
 
+# Attack patterns in a request line (URL-encoded or not): SQL injection, XSS, path traversal, command injection
+ATTACK_RX = re.compile(r"union(\s|%20|\+)+(all(\s|%20|\+)+)?select|(%27|')(\s|%20|\+)*(or|and)(\s|%20|\+)|(%27|')(\s|%20)*--|"
+                       r"<script|%3cscript|onerror|onload=|javascript:|\.\./|\.\.%2f|%2e%2e|\.\.\\|%5c\.\.|/etc/passwd|win\.ini|"
+                       r"(;|%3b|\||%7c)(\s|%20)*(cat|id|ls|uname|whoami)\b|\$\(|%24%28|`", re.I)
+ATTACK_MIN, ATTACK_SHARE = 20, 0.3
+LAST_ATTACKER: dict = {}    # the latest attacking client seen, for block_client (actions.py)
+# Traefik common log: <client> - - [date] "METHOD path PROTO" status size "ref" "ua" n "router" "url" Nms
+_ACCESS = re.compile(r'^(\S+) \S+ \S+ \[[^\]]*\] "(?:\S+) ([^"]*?) HTTP/[^"]*" (\d{3}) .*?"([^"]*)" "[^"]*" \d+ "([^"]*)"')
+
+
+def _read_attack(_s):
+    out = _sh(f"{KUBECTL} logs -n kube-system deploy/traefik --since=2m --tail=30000", timeout=60)
+    total, hits, lines = {}, {}, 0
+    for ln in out.splitlines():
+        m = _ACCESS.match(ln)
+        if not m or "ic-block" in m.group(5):     # requests our own block answered are not evidence of a new attack
+            continue
+        lines += 1
+        ip = m.group(1)
+        total[ip] = total.get(ip, 0) + 1
+        if ATTACK_RX.search(m.group(2)):
+            hits[ip] = hits.get(ip, 0) + 1
+    top = max(hits, key=hits.get) if hits else None
+    return json.dumps({"lines": lines, "clients": len(total), "top_client": top,
+                       "attack_requests": hits.get(top, 0) if top else 0,
+                       "share": round(hits[top] / total[top], 3) if top else 0.0})
+
+
+def _lbl_attack(out, _s):
+    d = json.loads(out)
+    if not d["lines"]:
+        return None                                 # no access log: unreadable, not "clean"
+    if d["top_client"] and d["attack_requests"] >= ATTACK_MIN and d["share"] >= ATTACK_SHARE:
+        LAST_ATTACKER.update(ip=d["top_client"], requests=d["attack_requests"], share=d["share"])
+        return "attack"
+    return "clean"
+
+
 _METRIC = {
     "cpu_saturation": _metric("cpu_saturation", ("saturated", "ok"),
                               "CPU use against the pod's CPU limit, peak of the last 3 minutes (saturated >= 90%)", _read_cpu, _lbl_cpu),
@@ -188,11 +226,15 @@ _METRIC = {
     "gpu_memory": _metric("gpu_memory", ("full", "ok"), "GPU memory in use (full >= 90%; DCGM)", _read_gpu_mem, _lbl_gpu_mem),
     "gpu_util": _metric("gpu_util", ("saturated", "ok"), "GPU utilisation, 2-minute average (saturated >= 90%; DCGM)",
                         _read_gpu_util, _lbl_gpu_util),
+    "attack_signature": _metric("attack_signature", ("attack", "clean"),
+                                "Requests at the ingress in the last 2 minutes carrying attack patterns (SQL injection, XSS, path "
+                                f"traversal, command injection) from one client (attack: >= {ATTACK_MIN} such requests and >= "
+                                f"{int(ATTACK_SHARE * 100)}% of that client's requests)", _read_attack, _lbl_attack, eps=0.1, cost=2.0),
 }
 
 KUBE = list(bench.TEMPLATES)                       # pod_health, deployment_ready, endpoints, service_ports, event_reason, log_signature
 APPLIES = {
-    "juice-shop": KUBE + ["cpu_saturation", "memory_pressure", "latency", "error_rate", "recent_change"],
+    "juice-shop": KUBE + ["cpu_saturation", "memory_pressure", "latency", "error_rate", "recent_change", "attack_signature"],
     "assistant": KUBE + ["cpu_saturation", "memory_pressure", "latency", "error_rate", "recent_change",
                          "queue_depth", "gpu_memory", "gpu_util"],
 }

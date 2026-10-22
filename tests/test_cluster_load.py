@@ -44,3 +44,14 @@ def test_log_replay_sends_the_profile_scaled(tmp_path, monkeypatch):
     assert sent.count("/assets/public/images/products/a.jpg") == (2 + 4) * 2
     assert sum(p.startswith("/rest/products/search") for p in sent) == 2
     assert replay.stats["error 4xx"] == 2
+
+
+def test_attack_payloads_are_mit_and_aimed_at_the_shop():
+    import replay
+    d = json.load(open(os.path.join(ROOT, "cluster/load/attacks/payloads.json")))
+    assert "MIT" in d["source"] and os.path.exists(os.path.join(ROOT, "cluster/load/attacks/LICENSE-PayloadsAllTheThings"))
+    assert {k: len(v) for k, v in d["payloads"].items()} == {"sqli": 60, "xss": 60, "traversal": 60, "cmdi": 60}
+    reqs = replay._attack_requests(d["payloads"])
+    assert len(reqs) == 60 * 2 + 60 * 3
+    assert {r[1].split("?")[0].rsplit("/", 1)[0] for r in reqs} <= {"/rest/products", "/rest/user", "/ftp", "/api"}
+    assert all(" " not in path for _, path, _ in reqs)          # every payload URL-encoded

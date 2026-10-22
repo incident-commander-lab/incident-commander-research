@@ -35,6 +35,11 @@ serverFiles:
             for: 2m
             labels: { severity: page }
             annotations: { summary: "more than 5% errors from {{ $labels.service }}" }
+          - alert: ShopClientErrors   # many refused or not-found requests: broken links, scans, attacks
+            expr: sum(rate(traefik_service_requests_total{service=~"shop-juice-shop.*",code=~"4.."}[2m])) / sum(rate(traefik_service_requests_total{service=~"shop-juice-shop.*"}[2m])) > 0.2
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "more than 20% of the shop's requests answered 4xx" }
           - alert: PodRestarting
             expr: increase(kube_pod_container_status_restarts_total{namespace="shop"}[5m]) > 0
             labels: { severity: page }

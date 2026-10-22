@@ -6,7 +6,7 @@
 #                                         one day per hour, repeated for <hours> (default 3), 60 users at peak
 #   cluster/demo/demo.sh replay [scale] [hours]  replay NASA's busiest 1995 day (launch-day surge), one day per
 #                                         hour, on top of the users; scale 4 = ~27 req/s at the peak
-#   cluster/demo/demo.sh inject <fault>   cpu_saturation_shop | memory_leak_assistant | gpu_memory_exhausted | assistant_bad_url
+#   cluster/demo/demo.sh inject <fault>   cpu_saturation_shop | memory_leak_assistant | gpu_memory_exhausted | attack_burst | assistant_bad_url
 #   cluster/demo/demo.sh heal             end the active fault now
 #   cluster/demo/demo.sh feed [n]         the agent's last n messages (default 3)
 #   cluster/demo/demo.sh approve <id>     approve an escalated incident's proposed fix (the human in the loop)

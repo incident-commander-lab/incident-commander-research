@@ -97,3 +97,39 @@ def test_rule_and_llm_agents_are_told_the_same_about_the_system():
     pr = probes.instances()
     for text in (A.PLATFORM, A.SYMPTOMS):
         assert text in A._system(pr) and text in L._system(pr)
+
+
+def test_attack_signature_reads_traefik_access_logs(monkeypatch):
+    from ic_cluster import probes
+    attack = '10.42.0.31 - - [22/Oct/2026:20:01:02 +0000] "GET /rest/products/search?q=%27%20OR%201%3D1--%20 HTTP/1.1" 500 12 "-" "scan/1.0" 41 "shop-juice-shop@kubernetes" "http://10.42.1.5:3000" 3ms'
+    trav = '10.42.0.31 - - [22/Oct/2026:20:01:03 +0000] "GET /ftp/..%2F..%2Fetc%2Fpasswd HTTP/1.1" 403 12 "-" "scan/1.0" 42 "shop-juice-shop@kubernetes" "http://10.42.1.5:3000" 2ms'
+    user = '10.42.0.20 - - [22/Oct/2026:20:01:03 +0000] "GET /rest/products/search?q=apple HTTP/1.1" 200 900 "-" "Mozilla" 43 "shop-juice-shop@kubernetes" "http://10.42.1.5:3000" 9ms'
+    blocked = attack.replace("shop-juice-shop@kubernetes", "shop-ic-block-10-42-0-31@kubernetescrd")
+    monkeypatch.setattr(probes, "_sh", lambda cmd, timeout=30: "\n".join([attack] * 15 + [trav] * 10 + [user] * 40))
+    p = probes.instances()["attack_signature:juice-shop"]
+    raw, label = probes.run(p)
+    assert label == "attack" and json.loads(raw)["top_client"] == "10.42.0.31" and probes.LAST_ATTACKER["ip"] == "10.42.0.31"
+    assert p.template.cost == 2.0
+    monkeypatch.setattr(probes, "_sh", lambda cmd, timeout=30: "\n".join([blocked] * 50 + [user] * 40))
+    assert probes.run(p)[1] == "clean"               # requests our block answered are not a new attack
+    monkeypatch.setattr(probes, "_sh", lambda cmd, timeout=30: "")
+    assert probes.run(p)[1] is None                  # no access log: unreadable, not evidence
+
+
+def test_block_client_needs_an_identified_attacker_and_a_human(monkeypatch):
+    from ic_cluster import actions, probes
+    probes.LAST_ATTACKER.clear()
+    with pytest.raises(RuntimeError):
+        actions.execute("block_client", reason="test")
+    applied, deleted = [], []
+    probes.LAST_ATTACKER.update(ip="10.42.0.31")
+    monkeypatch.setattr(actions, "_apply", lambda m: applied.append(m))
+    monkeypatch.setattr(actions, "_k", lambda *a: deleted.append(a) if a[0] == "delete" else "rancher/mirrored-library-traefik:2.11.18")
+    undo = actions.execute("block_client", reason="incident x")
+    route = applied[1]["spec"]["routes"][0]
+    assert applied[0]["spec"] == {"ipWhiteList": {"sourceRange": ["127.0.0.1/32"]}}
+    assert route["match"] == "ClientIP(`10.42.0.31`)" and route["middlewares"] == [{"name": "ic-deny-all"}]
+    undo()
+    assert deleted and deleted[0][:2] == ("delete", "ingressroute.traefik.io")
+    policy = open(os.path.join(ROOT, "cluster/agent/policy.rego")).read()
+    assert 'input.action == "block_client"' in policy and "not input.approved" in policy
