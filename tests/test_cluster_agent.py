@@ -175,3 +175,20 @@ def test_every_pulse_fault_has_a_fix_the_agent_can_take():
     remedies = _agent_view("shop,pulse")["remedies"]
     for f, (svc, remedy, also) in faults.items():
         assert remedy in remedies, (f, remedy)
+
+
+def test_attack_pattern_recall_and_no_false_alarms():
+    # measured 23 Oct: the first pattern matched only 26% of the attack lines on AWS (missed the attack)
+    import re as _re
+    sys.path.insert(0, os.path.join(ROOT, "cluster", "load", "replay"))
+    import replay
+    from ic_cluster import probes as P
+    d = json.load(open(os.path.join(ROOT, "cluster/load/attacks/payloads.json")))["payloads"]
+    lines = [p for m, p, b in replay._attack_requests(d) if m == "GET"]          # POST bodies never reach the access log
+    recall = sum(bool(P.ATTACK_RX.search(P._decoded(p))) for p in lines) / len(lines)
+    assert recall >= 0.95, recall
+    src = open(os.path.join(ROOT, "cluster/load/locustfile.py")).read()
+    terms = [t.strip().strip("\"'") for t in _re.search(r"SEARCH_TERMS\s*=\s*\[(.*?)\]", src, _re.S).group(1).split(",") if t.strip()]
+    pick = replay._paths([{"id": i, "image": f"{n}.jpg"} for i, n in enumerate(["apple_juice", "carrot_juice", "3d_keychain"], 1)])
+    normal = [pick[c]() for c in pick for _ in range(200)] + [f"/rest/products/search?q={w}" for w in terms + replay.WORDS]
+    assert not [p for p in normal if P.ATTACK_RX.search(P._decoded(p))]
