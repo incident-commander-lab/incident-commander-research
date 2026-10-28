@@ -70,23 +70,41 @@ def check(path: Path) -> dict:
             "qualifies": hours >= MIN_HOURS and max_gap <= MAX_GAP_S and unordered == 0}
 
 
+NEED_FILES = int(-(-MIN_HOURS // 1))   # hourly files that cover [start, start + MIN_HOURS]: 5 for 4.5 h
+# a seed file runs from the start hour to MIN_HOURS later, plus this margin so it is never shorter
+END_MARGIN = timedelta(seconds=MAX_GAP_S)
+
+
+def _window_events(files: dict, start: datetime):
+    """Event times inside [start, start + MIN_HOURS + margin], from the hourly files that cover it."""
+    end = start + timedelta(hours=MIN_HOURS) + END_MARGIN
+    for i in range(NEED_FILES + 1):
+        p = files.get(start + timedelta(hours=i))
+        if p is None:
+            continue
+        for t in _times(p):
+            if start <= t <= end:
+                yield t
+
+
 def windows(folder: Path) -> list[dict]:
-    """Each start hour from which consecutive hourly files reach MIN_HOURS with no long gap."""
+    """Each start hour whose next MIN_HOURS are recorded with no gap above MAX_GAP_S, counting the
+    edges: the first event must come within MAX_GAP_S of the start, and the recording must reach
+    start + MIN_HOURS. A partial last hour is fine as long as it reaches that point."""
     files = hourly_files(folder)
-    need = int(-(-MIN_HOURS // 1)) + 1   # whole hours needed to cover MIN_HOURS from any start
     out = []
     for start in files:
-        hours = [start + timedelta(hours=i) for i in range(need)]
-        if not all(h in files for h in hours):
+        if not all(start + timedelta(hours=i) in files for i in range(NEED_FILES)):
             continue
-        last, max_gap, n = None, 0.0, 0
-        for h in hours:
-            for t in _times(files[h]):
-                if last is not None:
-                    max_gap = max(max_gap, (t - last).total_seconds())
-                last = t
-                n += 1
-        out.append({"start": start.strftime("%Y%m%d%H"), "hour_utc": start.hour, "files": need,
+        need_end = start + timedelta(hours=MIN_HOURS)
+        last, max_gap, n = start, 0.0, 0
+        for t in _window_events(files, start):
+            max_gap = max(max_gap, (t - last).total_seconds())
+            last = t
+            n += 1
+        if last < need_end:   # stops before the window ends: the missing tail is a gap
+            max_gap = max(max_gap, (need_end - last).total_seconds())
+        out.append({"start": start.strftime("%Y%m%d%H"), "hour_utc": start.hour, "files": NEED_FILES,
                     "events": n, "max_gap_s": round(max_gap, 1), "qualifies": max_gap <= MAX_GAP_S})
     return out
 
@@ -104,16 +122,19 @@ def assign(found: list[dict]) -> dict[int, str]:
 def make(folder: Path, start: str, out_name: str) -> dict:
     files = hourly_files(folder)
     t0 = datetime.strptime(start, "%Y%m%d%H").replace(tzinfo=timezone.utc)
-    need = int(-(-MIN_HOURS // 1)) + 1
-    parts = [files.get(t0 + timedelta(hours=i)) for i in range(need)]
-    if not all(parts):
-        raise SystemExit(f"missing hourly files for a {need}-hour window from {start}")
+    if not all(t0 + timedelta(hours=i) in files for i in range(NEED_FILES)):
+        raise SystemExit(f"missing hourly files for the window from {start}")
+    end = t0 + timedelta(hours=MIN_HOURS) + END_MARGIN
     out = Path(folder) / out_name
-    with out.open("w", encoding="utf-8") as f:
-        for p in parts:
-            for line in p.read_text(encoding="utf-8").splitlines():
-                if line.strip():
-                    f.write(line + "\n")
+    with out.open("w", encoding="utf-8", newline="\n") as f:   # exactly the window, LF line ends
+        for i in range(NEED_FILES + 1):
+            p = files.get(t0 + timedelta(hours=i))
+            if p is None:
+                continue
+            with p.open(encoding="utf-8") as src:
+                for line in src:
+                    if line.strip() and t0 <= _ts(json.loads(line)["recv_ts"]) <= end:
+                        f.write(line.rstrip("\r\n") + "\n")
     res = check(out)
     if not res["qualifies"]:
         out.unlink()

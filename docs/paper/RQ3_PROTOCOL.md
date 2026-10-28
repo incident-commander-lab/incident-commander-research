@@ -6,8 +6,8 @@ scored session; any later change is listed under "Changes" with its date and rea
 **Status:** ready to lock (19 Oct). All open decisions are answered (see "Changes"). It is
 locked when this file is merged and tagged `rq3-protocol-locked`, before the first scored
 session. The scorer (`testbed/ops/testbed_ops/score.py`, `analyze` for the comparison)
-implements this file exactly. Left before the lock: making the six recordings and one smoke
-session per agent (see "Changes").
+implements this file exactly. The six recordings are made and fingerprinted (28 Oct, see
+"Changes"); left before the lock: one smoke session per agent.
 
 ## Question and hypotheses
 
@@ -297,12 +297,38 @@ Reviewed by Nour as evaluation lead. The body of this file already reflects ever
   gated on the URL and the egress relay (`testbed/app/src/replay.js`, tests in
   `testbed/app/test/replay.test.js`). The fault injector uses the same `SESSION_START` and
   does not re-inject past slots if it restarts (`slot_skipped_restart`, counted in the report).
+- **Recordings, made 28 Oct (Nour).** 70 recorded hours (21 Oct 14:00 → 28 Oct 12:31 UTC), all
+  from AWS recorders in eu-north-1 (`infra/record.sh`), scanned with `testbed_ops.recordings`;
+  the pre-registered rule (first qualifying window per start hour) gave:
+
+  | Seed | Window (UTC) | Events | Events/s | Max gap | SHA-256 of `seed<N>.ndjson` |
+  |---|---|---|---|---|---|
+  | 101 | 22 Oct 00:00 → 04:31 | 448,784 | 27.6 | 3.8 s | `f67e80bbc4a8761b9b890437895c593c22758dee27cb4adb6f27bce77a73d507` |
+  | 102 | 28 Oct 04:00 → 08:31 | 345,617 | 21.3 | 4.3 s | `d6d430143d9e05a862cdede68def63ab3597babeaf214c0a13004666f6f55065` |
+  | 103 | 28 Oct 08:00 → 12:31 | 569,703 | 35.0 | 3.6 s | `8bdbd013e1db8c8ff4c33ba850c1a73cc4f9d8404d2eff6cedd4fd384f3a5356` |
+  | 104 | 22 Oct 12:00 → 16:31 | 547,131 | 33.7 | 2.8 s | `4bc6ea0389a412d7f7c0bf7b3e8e210b51cc61013b1237396444ceded8e7b566` |
+  | 105 | 21 Oct 16:00 → 20:31 | 567,473 | 34.9 | 3.2 s | `86241597f9b29adea583cbc51d30f47d71a1dd4f637e06aa16393c5ae0b46560` |
+  | 106 | 21 Oct 20:00 → 00:31 | 503,826 | 31.0 | 3.8 s | `22ed8523d1588dab51d34ed158e9ee39a0198ceb200044d5c7c5b28bbc4bffef` |
+
+  Each file is exactly the window plus a 60 s margin (4.52 h), from the hourly files, LF line
+  ends. Notes, recorded before any session:
+  - The 04:00 and 08:00 windows of 22 Oct failed (one 72 s gap each, Wikimedia-side). Windows
+    recorded on 25 Oct in a second AWS account were lost when that account was suspended for
+    verification before they could be downloaded; they are treated as never recorded. A laptop
+    recording on 23–24 Oct was discarded (home Wi-Fi: stalls of minutes and up to 1 h of lag),
+    and is not part of the scan.
+  - Seed 102 starts in a low-traffic period: the stream delivered ~20–60k events/h from 01:00 to
+    05:00 UTC on 28 Oct instead of ~100k+, with no gaps on our side (likely Wikimedia-side). It
+    meets the rule; its load is reported as is.
+  - Tool fix (28 Oct): `recordings` required six whole hourly files for a 4.5 h window, which
+    rejects a window whose last hour is partial but long enough (seed 103 ends at 12:31). It now
+    checks the actual span, edges included (tests added).
+  - The recorder's hourly compression never ran when started from Windows (CRLF line ends in the
+    copied scripts; fixed in `infra/record.sh` on the infra branch). No data was lost: the
+    uncompressed hours were on disk and were compressed and uploaded afterwards.
 - Still needed before the lock:
-  1. Make the six recordings: `python -m testbed_ops.recordings scan ../recordings` lists the
-     windows that qualify and the assignment the rule gives; `make` builds each `seed<N>.ndjson`;
-     record each SHA-256 here. Recordings must be made on the machine that has the hourly
-     files (the live test bed's host); if a start hour has no qualifying window yet, record
-     live until it does.
+  1. Copy the six `seed<N>.ndjson` files to `testbed/recordings/` on the session host and check
+     their SHA-256 against the table above.
   2. One smoke session per agent on a seen fault set (`CHAOS_FAULTS=bad_release_worker,db_lock`,
      not scored) to confirm replay, `SESSION_START` and the header end to end in Docker. The
      Docker path cannot be run on the machine these changes were written on.

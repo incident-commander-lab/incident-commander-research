@@ -29,7 +29,8 @@ class RecordingsTest(unittest.TestCase):
             root = Path(d)
             _hours(root, START, 6)
             found = windows(root)
-            self.assertEqual([w["start"] for w in found if w["qualifies"]], ["2026101900"])
+            # 6 hours recorded: windows starting at 00 and 01 both have the 4.5 h they need
+            self.assertEqual([w["start"] for w in found if w["qualifies"]], ["2026101900", "2026101901"])
             res = make(root, "2026101900", "seed101.ndjson")
             self.assertTrue(res["qualifies"])
             self.assertGreaterEqual(res["hours"], 4.5)
@@ -44,6 +45,30 @@ class RecordingsTest(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 make(root, "2026101900", "bad.ndjson")
             self.assertFalse((root / "bad.ndjson").exists())
+
+    def test_a_partial_last_hour_is_enough_if_it_reaches_the_window_end(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _hours(root, START, 4)                       # 00-03 complete
+            last = START + timedelta(hours=4)            # hour 04 only until 04:32
+            lines, t = [], last
+            while t < last + timedelta(minutes=32):
+                lines.append(json.dumps({"recv_ts": t.isoformat(), "data": "{}"}))
+                t += timedelta(seconds=10)
+            (root / f"wikipedia-{last:%Y%m%d%H}.ndjson").write_text("\n".join(lines) + "\n", encoding="utf-8")
+            self.assertTrue(windows(root)[0]["qualifies"])
+            res = make(root, "2026101900", "seed.ndjson")
+            self.assertTrue(res["qualifies"])
+
+    def test_a_window_that_stops_early_does_not_qualify(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            _hours(root, START, 4)
+            last = START + timedelta(hours=4)            # hour 04 ends at 04:10: 20 min short
+            (root / f"wikipedia-{last:%Y%m%d%H}.ndjson").write_text(
+                json.dumps({"recv_ts": (last + timedelta(minutes=10)).isoformat(), "data": "{}"}) + "\n",
+                encoding="utf-8")
+            self.assertFalse(windows(root)[0]["qualifies"])
 
     def test_missing_hours_give_no_window(self):
         with tempfile.TemporaryDirectory() as d:
