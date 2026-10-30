@@ -97,6 +97,7 @@ echo "$ID  started $(date '+%F %H:%M')  agent=$KIND seed=$SEED faults=$SLOTS  re
 
 # wait for the last slot's fault to end for its fault to end (timeout) and the agent to settle
 WAIT=$(python3 -c "print(int($SESSION_START - $(date +%s) + $SLOTS * $SLOT * 60 + ($TIMEOUT + 8) * 60))")
-nohup caffeinate -i "$0" _finish "$ID" "$WAIT" > "$OUT/runner.log" 2>&1 &
+KEEPAWAKE=$(command -v caffeinate >/dev/null && echo "caffeinate -i" || true)   # macOS only; Linux hosts do not sleep
+nohup $KEEPAWAKE "$0" _finish "$ID" "$WAIT" > "$OUT/runner.log" 2>&1 &
 echo "Session $ID running: $SLOTS faults, about $(python3 -c "print(round($WAIT/3600, 1))") h."
 echo "Grafana http://localhost:3301 · agent http://localhost:8380/incidents · progress: ./run-session.sh status"
