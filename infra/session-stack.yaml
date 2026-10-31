@@ -1,0 +1,99 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Incident Commander RQ3 session host - ONE Spot GPU machine in eu-north-1 for the Compose test bed
+  (testbed/run-session.sh): Docker, Ollama 0.35.0 with qwen3:8b on the GPU, no inbound access
+  (default security group, members only), Session Manager for shells, tagged so the named
+  collaborator may open a shell. Terminates itself after SessionHours. Driven by infra/session.sh.
+  Needs the ic-gpu-session-host role from infra/session-iam.yaml.
+
+Parameters:
+  SessionHours:
+    Type: Number
+    Default: 8
+    MinValue: 1
+    MaxValue: 24
+    Description: The machine shuts itself down (= terminates) after this many hours.
+  Owner:
+    Type: String
+    Default: nourseen
+    Description: IAM user who may open a shell on the machine (her policy matches the owner tag).
+  Bucket:
+    Type: String
+    Default: ic-recordings-374617280285
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  InstanceType:
+    Type: String
+    Default: g4dn.xlarge
+    AllowedValues: [g4dn.xlarge, g5.xlarge, g6.xlarge]
+  GpuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id
+
+Resources:
+  Template:
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        IamInstanceProfile: { Name: ic-gpu-session-host }
+        InstanceInitiatedShutdownBehavior: terminate
+        InstanceMarketOptions:
+          MarketType: spot
+          SpotOptions: { SpotInstanceType: one-time, InstanceInterruptionBehavior: terminate }
+        MetadataOptions: { HttpTokens: required, HttpEndpoint: enabled }
+        SecurityGroupIds: [!Ref SecurityGroupId]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags:
+              - { Key: project, Value: incident-commander-gpu }
+              - { Key: owner, Value: !Ref Owner }
+              - { Key: stack, Value: !Ref AWS::StackName }
+          - ResourceType: volume
+            Tags: [{ Key: project, Value: incident-commander-gpu }]
+
+  Host:
+    Type: AWS::EC2::Instance
+    Properties:
+      LaunchTemplate: { LaunchTemplateId: !Ref Template, Version: !GetAtt Template.LatestVersionNumber }
+      InstanceType: !Ref InstanceType
+      ImageId: !Ref GpuAmi
+      SubnetId: !Ref SubnetId
+      BlockDeviceMappings: [{ DeviceName: /dev/sda1, Ebs: { VolumeSize: 150, VolumeType: gp3, DeleteOnTermination: true } }]
+      Tags: [{ Key: Name, Value: !Sub "${AWS::StackName}-host" }]
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -ux
+          shutdown -h +$(( ${SessionHours} * 60 )) "session time limit"
+          nvidia-smi -L || true
+          # Compose v2 (the DLAMI may ship only the docker engine); pinned, checksum from the same release
+          if ! docker compose version >/dev/null 2>&1; then
+            V=v2.32.4; D=/usr/local/lib/docker/cli-plugins; mkdir -p $D
+            curl -fsSL -o $D/docker-compose https://github.com/docker/compose/releases/download/$V/docker-compose-linux-x86_64
+            W=$(curl -fsSL https://github.com/docker/compose/releases/download/$V/docker-compose-linux-x86_64.sha256 | awk '{print $1}')
+            echo "$W  $D/docker-compose" | sha256sum -c - && chmod +x $D/docker-compose
+          fi
+          # Ollama in Docker (the same image as the cluster sessions), on the GPU, reachable from the compose network
+          mkdir -p /opt/ollama
+          docker run -d --restart=always --gpus all -p 11434:11434 -v /opt/ollama:/root/.ollama --name ollama ollama/ollama:0.35.0
+          cat > /usr/local/bin/ollama <<'WRAP'
+          #!/bin/bash
+          # run-session.sh calls `ollama show <model>`; the engine lives in the container
+          exec docker exec -i ollama ollama "$@"
+          WRAP
+          chmod +x /usr/local/bin/ollama
+          for i in $(seq 1 30); do curl -sf http://localhost:11434/api/tags >/dev/null && break; sleep 5; done
+          docker exec ollama ollama pull qwen3:8b
+          mkdir -p /home/ubuntu/ic /data/s3
+          chown ubuntu:ubuntu /home/ubuntu/ic /data/s3
+          # session outputs go to the bucket every 5 min, so a Spot interruption does not lose them
+          cat > /etc/cron.d/ic-session-results <<'CRON'
+          */5 * * * * ubuntu [ -d /home/ubuntu/ic/testbed/sessions ] && aws s3 sync /home/ubuntu/ic/testbed/sessions s3://${Bucket}/session-results/${AWS::StackName}/sessions --only-show-errors
+          CRON
+          touch /var/lib/ic-session-ready
+
+Outputs:
+  InstanceId: { Value: !Ref Host }
+  Owner: { Value: !Ref Owner }

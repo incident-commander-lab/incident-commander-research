@@ -15,7 +15,7 @@ PROFILE=ic-bench; REGION=eu-north-1; CAP=5
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 aws_() { aws --profile "$PROFILE" --region "$REGION" "$@"; }
 say()  { printf '\n\033[1m%s\033[0m\n' "$*"; }
-stack() { aws_ cloudformation describe-stacks --query "Stacks[?starts_with(StackName,'ic-gpu-') && StackName!='ic-gpu-recorder' && StackStatus!='DELETE_COMPLETE'].StackName|[0]" --output text 2>/dev/null | grep -v None || true; }
+stack() { aws_ cloudformation describe-stacks --query "Stacks[?starts_with(StackName,'ic-gpu-') && StackName!='ic-gpu-recorder' && !starts_with(StackName,'ic-gpu-sess-') && StackStatus!='DELETE_COMPLETE'].StackName|[0]" --output text 2>/dev/null | grep -v None || true; }
 out()   { aws_ cloudformation describe-stacks --stack-name "$(stack)" --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue|[0]" --output text; }
 
 onhost() {   # onhost <timeout> <script file>: run as root on the ops machine via Session Manager (it logs in as ssm-user)
