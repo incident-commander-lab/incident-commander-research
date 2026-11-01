@@ -4,7 +4,7 @@
 # Manager. Nothing is public; the machine terminates itself after the session's hours.
 #
 #   infra/session.sh up [hours] [owner]   create the machine (default 8 h, owner nourseen); refuses above $5
-#                                         or below the $15 credit floor; tries g4dn in 1a/1b/1c, then g5
+#                                         or below the $15 credit floor; tries g4dn, g5 and g6 in 1b/1c first, g4dn in 1a last
 #   infra/session.sh deploy [git-ref]     copy the code (default: research/eval/rq3-recordings) and wait until
 #                                         Ollama and qwen3:8b are ready
 #   infra/session.sh status               state, time left, the model, the commands the collaborator runs
@@ -38,7 +38,7 @@ up)
   [ -n "$(stack)" ] && { echo "a session host already exists: $(stack)"; exit 1; }
   aws_ iam get-instance-profile --instance-profile-name ic-gpu-session-host >/dev/null 2>&1 \
     || { echo "STOP: the ic-gpu-session-host role does not exist. As root, deploy infra/session-iam.yaml in $REGION first."; exit 1; }
-  P=$(aws_ ec2 describe-spot-price-history --instance-types g4dn.xlarge g5.xlarge --product-descriptions Linux/UNIX \
+  P=$(aws_ ec2 describe-spot-price-history --instance-types g4dn.xlarge g5.xlarge g6.xlarge --product-descriptions Linux/UNIX \
         --start-time "$(date -u +%FT%TZ)" --query 'SpotPriceHistory[].[InstanceType,SpotPrice]' --output text \
       | python3 -c 'import sys
 m=max(float(l.split()[1]) for l in sys.stdin); print(round(m + 150*0.0836/730, 4))')
@@ -49,7 +49,8 @@ m=max(float(l.split()[1]) for l in sys.stdin); print(round(m + 150*0.0836/730, 4
   echo "credits left: \$$LEFT"
   python3 -c "import sys; sys.exit(0 if float('$LEFT') - float('$COST') >= 15 else 1)" || { echo "STOP: would go below the \$15 credit floor"; exit 1; }
   SG=$(aws_ ec2 describe-security-groups --filters Name=group-name,Values=default --query 'SecurityGroups[0].GroupId' --output text)
-  for TRY in g4dn.xlarge:eu-north-1a g4dn.xlarge:eu-north-1b g4dn.xlarge:eu-north-1c g5.xlarge:eu-north-1b g5.xlarge:eu-north-1c; do
+  # 1a lost two hosts to Spot reclaims on 31 Oct (35 and 37 min in), so it goes last
+  for TRY in g4dn.xlarge:eu-north-1b g4dn.xlarge:eu-north-1c g5.xlarge:eu-north-1b g5.xlarge:eu-north-1c g6.xlarge:eu-north-1b g6.xlarge:eu-north-1c g4dn.xlarge:eu-north-1a; do
     TYPE=${TRY%%:*}; AZ=${TRY#*:}
     SUB=$(aws_ ec2 describe-subnets --filters Name=default-for-az,Values=true Name=availability-zone,Values=$AZ --query 'Subnets[0].SubnetId' --output text)
     NAME="ic-gpu-sess-$(date +%m%d-%H%M%S)"
@@ -87,6 +88,8 @@ status)
   S=$(stack); [ -n "$S" ] || { echo "no session host (nothing is costing money)"; exit 0; }
   ID=$(out InstanceId); OWNER=$(out Owner)
   echo "stack: $S  instance: $ID  owner: $OWNER"
+  [ -n "$(aws_ ec2 describe-instances --instance-ids "$ID" --filters Name=instance-state-name,Values=pending,running --query 'Reservations[].Instances[].InstanceId' --output text)" ] \
+    || { echo "LOST: the instance is no longer running (Spot reclaim or the time limit). infra/session.sh down, then up again."; exit 1; }
   aws_ ec2 describe-instances --instance-ids "$ID" --query 'Reservations[0].Instances[0].[InstanceType,State.Name,Placement.AvailabilityZone,LaunchTime]' --output text
   host 90 'echo "shutdown: $(date -u -d @$(( $(grep USEC /run/systemd/shutdown/scheduled | cut -d= -f2) / 1000000 )) +%F\ %H:%M) UTC"; test -f /var/lib/ic-session-ready && echo "ready: Ollama + qwen3:8b" || echo "still starting"; docker exec ollama ollama list 2>/dev/null | tail -2; ls /home/ubuntu/ic/testbed/sessions 2>/dev/null | tail -5'
   cat <<EOT
