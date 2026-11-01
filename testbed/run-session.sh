@@ -21,7 +21,8 @@ finish() {   # finish <ID>: collect the answer key and incidents, score, back to
   set +e
   local ID=$1 OUT="sessions/$1"
   $DC exec -T chaos python -m testbed_ops.chaos heal >/dev/null 2>&1
-  $DC exec -T chaos cat /sealed/ground_truth.jsonl > "$OUT/ground_truth.jsonl"
+  # a one-off container reads the key even if the injector is down or restarting
+  $DC run --rm --no-deps -T --entrypoint cat chaos /sealed/ground_truth.jsonl > "$OUT/ground_truth.jsonl"
   CHAOS_MODE=serve AUTONOMY=shadow AGENT_KIND=rule $DC up -d chaos agent >/dev/null 2>&1   # back to manual mode
   cp incidents/*.json "$OUT/" 2>/dev/null; cp incidents/outbox.log incidents/agent_errors.log "$OUT/" 2>/dev/null
   (cd ops && python3 -m testbed_ops.score "../$OUT/ground_truth.jsonl" "../$OUT") > "$OUT/report.txt" 2>&1
@@ -36,7 +37,7 @@ fi
 if [ "${1:-}" = "status" ]; then
   cat sessions/.current 2>/dev/null || { echo "no session running"; exit 0; }
   echo "incidents so far: $(ls incidents/*.json 2>/dev/null | wc -l | tr -d ' ')"
-  echo "faults so far:    $($DC exec -T chaos sh -c 'grep -c "\"inject\"" /sealed/ground_truth.jsonl' 2>/dev/null || echo ?)"
+  echo "faults so far:    $($DC run --rm --no-deps -T --entrypoint sh chaos -c 'grep -c "\"inject\"" /sealed/ground_truth.jsonl' 2>/dev/null || echo ?)"
   exit 0
 fi
 
@@ -71,7 +72,11 @@ if ls incidents/*.json >/dev/null 2>&1; then
   [ -f incidents/agent_errors.log ] && mv incidents/agent_errors.log "sessions/_before-$ID/"
 fi
 $DC stop chaos agent >/dev/null 2>&1 || true
-$DC run --rm --no-deps --entrypoint sh chaos -c 'rm -f /sealed/ground_truth.jsonl /sealed/active.json' >/dev/null
+# every session starts from the same state: baseline releases (no history), an empty change log,
+# no active fault. Faults left by a stopped session (SIGSTOP, stopped containers, Redis limits, the
+# DB lock) end with the --force-recreate below.
+$DC run --rm --no-deps --entrypoint sh chaos -c 'rm -f /sealed/ground_truth.jsonl /sealed/active.json /releases/*.json /state/changes.jsonl \
+  && python -c "from testbed_ops import env; env.ensure_baseline_releases()"' >/dev/null
 
 export AGENT_KIND=$KIND AUTONOMY=act CHAOS_MODE=slots CHAOS_SEED=$SEED CHAOS_SLOTS=$SLOTS \
        CHAOS_SLOT_MIN=$SLOT FAULT_TIMEOUT_MIN=$TIMEOUT AGENT_MODEL=$MODEL \

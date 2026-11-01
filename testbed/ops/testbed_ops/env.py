@@ -71,6 +71,14 @@ def rds():
 
 
 # ------------------------------------------------------------------ releases
+def write_atomic(p: Path, text: str):
+    """Write then rename: the agent and the injector read these files while the other writes them,
+    and a plain write_text lets a reader see an empty file (JSONDecodeError)."""
+    tmp = p.with_name(p.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, p)
+
+
 def current_release(service: str) -> dict:
     p = RELEASES / f"{service}.json"
     return json.loads(p.read_text()) if p.exists() else {"version": "1.0.0", "env": {}}
@@ -85,8 +93,8 @@ def deploy(service: str, release: dict, actor: str, reason: str) -> dict:
     """Write the release file, record the change, restart the container."""
     old = current_release(service)
     hist = _history(service) + [old]
-    (RELEASES / f"{service}.history.json").write_text(json.dumps(hist[-20:], indent=1))
-    (RELEASES / f"{service}.json").write_text(json.dumps(release, indent=1))
+    write_atomic(RELEASES / f"{service}.history.json", json.dumps(hist[-20:], indent=1))
+    write_atomic(RELEASES / f"{service}.json", json.dumps(release, indent=1))
     record_change(service, "deploy", actor, reason, frm=old.get("version"), to=release.get("version"))
     container(service).restart(timeout=10)
     return old
@@ -99,8 +107,8 @@ def rollback(service: str, actor: str, reason: str) -> Optional[dict]:
         return None
     prev = hist[-1]
     bad = current_release(service)
-    (RELEASES / f"{service}.history.json").write_text(json.dumps(hist[:-1], indent=1))
-    (RELEASES / f"{service}.json").write_text(json.dumps(prev, indent=1))
+    write_atomic(RELEASES / f"{service}.history.json", json.dumps(hist[:-1], indent=1))
+    write_atomic(RELEASES / f"{service}.json", json.dumps(prev, indent=1))
     record_change(service, "rollback", actor, reason, frm=bad.get("version"), to=prev.get("version"))
     container(service).restart(timeout=10)
     return bad
@@ -111,7 +119,7 @@ def ensure_baseline_releases():
     for s in RELEASED:
         p = RELEASES / f"{s}.json"
         if not p.exists():
-            p.write_text(json.dumps({"version": "1.0.0", "env": {}}, indent=1))
+            write_atomic(p, json.dumps({"version": "1.0.0", "env": {}}, indent=1))
 
 
 # ------------------------------------------------------------------ change log
