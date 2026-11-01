@@ -15,6 +15,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 DC="docker compose"
+export MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*"   # Git Bash on Windows: keep container paths such as /recordings as written
 
 finish() {   # finish <ID>: collect the answer key and incidents, score, back to manual mode
   set +e
