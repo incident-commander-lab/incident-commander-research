@@ -211,15 +211,21 @@ what next.
 - Scorer: every incident on a fault now counts for H3a/H3b, the fault staying the unit
   (Shahesta's proposal, accepted in "Changes"). `testbed/sessions/` is ignored by git.
 
+- Shahesta's second review: the cooldown hole is closed (both agents), `run-session.sh`
+  refuses to run without a git commit and `analyze` rejects a header without one. Because this
+  changes the agent, the smoke sessions are re-run on the final commit.
+
 **Next, Shahesta:**
-1. Review and merge PR #8, tag `rq3-protocol-locked`.
-2. Start the pilot host as a `git clone` at the tag (about 9 h for two sessions).
+1. A host as a `git clone` of PR #8's head (about 3 h): one smoke session per agent.
+2. If both pass: merge PR #8 and tag `rq3-protocol-locked` on that same commit.
+3. Then the pilot host, a `git clone` at the tag (about 9 h for two sessions).
 
 **Next, Nour:**
-1. Pilot: seeds 101–102, both agents (A-B-B-A), then check the disagreement rate.
+1. Run the smoke sessions and check them; then the pilot: seeds 101–102, both agents
+   (A-B-B-A), and the disagreement rate.
 2. Meanwhile: the RQ2 section of Paper 1.
 
-**Blocked on:** the merge and the tag.
+**Blocked on:** a session host.
 
 ### 19 Oct 2026, Nour
 

@@ -172,6 +172,14 @@ class AnalyzeTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "replay files differ"):
                 analyze([load_session(p) for p in dirs])
 
+    def test_rejects_a_session_with_no_commit(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            dirs = [_session(root, "rule", 101, ["fix"] * 3, git_commit=""),
+                    _session(root, "llm", 101, ["fix"] * 3)]
+            with self.assertRaisesRegex(ValueError, "no git_commit"):
+                analyze([load_session(p) for p in dirs])
+
     def test_warns_about_frozen_settings_and_dirty_runs(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

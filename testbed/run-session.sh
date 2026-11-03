@@ -63,6 +63,8 @@ import json, sys
 m = sys.argv[1]
 print(next((x['digest'] for x in json.load(sys.stdin)['models'] if x['name'] in (m, m + ':latest')), ''))" "$MODEL")
 [ -n "$DIGEST" ] || { echo "could not read the digest of $MODEL from Ollama"; exit 1; }
+# the header must say which code ran: run from a git clone, not a copy
+git rev-parse --verify -q HEAD >/dev/null || { echo "git cannot report a commit here: run sessions from a git clone"; exit 1; }
 mkdir -p "$OUT"
 
 # fresh answer key and incident folder; earlier incidents are archived, never deleted

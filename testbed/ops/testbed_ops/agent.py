@@ -52,7 +52,8 @@ ACT_THRESHOLD = 1 - (COST_ESCALATE - COST_ACT) / COST_HARM
 
 app = FastAPI(title="Incident Commander (test bed)")
 _q: "queue.Queue[dict]" = queue.Queue()
-_busy_until = 0.0
+_busy_until = 0.0         # no new incident before this time; infinite while one is handled
+_busy_lock = threading.Lock()
 _pending_approval: dict[str, dict] = {}
 
 
@@ -198,7 +199,6 @@ def _save(rec: dict):
 
 # ------------------------------------------------------------------ one incident
 def handle(alerts: list[dict]):
-    global _busy_until
     t0 = time.time()
     llm.reset_usage()
     rec = {"id": time.strftime("%Y%m%d-%H%M%S-") + uuid.uuid4().hex[:4], "opened": env.now(),
@@ -296,7 +296,6 @@ def handle(alerts: list[dict]):
     rec["llm_usage"] = dict(llm.USAGE)
     rec["seconds"] = round(time.time() - t0, 1)
     _save(rec)
-    _busy_until = time.time() + COOLDOWN_SECONDS
 
 
 def _act(rec: dict, remedy: str, p: float, pr: dict, approved: bool):
@@ -321,6 +320,7 @@ def _act(rec: dict, remedy: str, p: float, pr: dict, approved: bool):
 
 
 def _loop():
+    global _busy_until
     while True:
         alerts = _q.get()
         try:
@@ -333,6 +333,9 @@ def _loop():
             OUT.mkdir(parents=True, exist_ok=True)
             with (OUT / "agent_errors.log").open("a") as f:
                 f.write(f"{env.now()} {type(e).__name__}: {e}\n")
+        finally:   # the cooldown starts when the incident is done, for both agents, even after a crash
+            with _busy_lock:
+                _busy_until = time.time() + COOLDOWN_SECONDS
 
 
 threading.Thread(target=_loop, daemon=True).start()
@@ -346,9 +349,14 @@ async def alert(req: Request):
                "started": a.get("startsAt")} for a in body.get("alerts", []) if a.get("status") == "firing"]
     if not firing:
         return {"ignored": "resolved notification"}
-    if time.time() < _busy_until or not _q.empty():
-        return {"ignored": "incident in progress or cooling down"}
-    _q.put(firing)
+    global _busy_until
+    # busy from the moment an alert is accepted: an alert arriving during an investigation is
+    # dropped, not queued to run straight after it (3 Nov: it bypassed the cooldown)
+    with _busy_lock:
+        if time.time() < _busy_until or not _q.empty():
+            return {"ignored": "incident in progress or cooling down"}
+        _busy_until = float("inf")
+        _q.put(firing)
     return {"queued": [a["name"] for a in firing]}
 
 

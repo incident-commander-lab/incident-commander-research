@@ -578,6 +578,8 @@ def analyze(sessions: list[Session], a_kind: str = "rule", b_kind: str = "llm") 
             raise ValueError(f"{s.folder}: AGENT_KIND {kind!r} is neither {a_kind} nor {b_kind}")
         if seed in by[kind]:
             raise ValueError(f"{s.folder}: seed {seed} appears twice for {kind}")
+        if not s.header.get("git_commit"):
+            raise ValueError(f"{s.folder}: no git_commit in the header, so the code that ran is unknown")
         by[kind][seed] = s
     if set(by[a_kind]) != set(by[b_kind]):
         raise ValueError(f"seeds differ: {a_kind} {sorted(by[a_kind])}, {b_kind} {sorted(by[b_kind])}")

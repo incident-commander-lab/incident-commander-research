@@ -6,9 +6,9 @@ scored session; any later change is listed under "Changes" with its date and rea
 **Status:** ready to lock (3 Nov). All open decisions are answered (see "Changes"). It is
 locked when this file is merged and tagged `rq3-protocol-locked`, before the first scored
 session. The scorer (`testbed/ops/testbed_ops/score.py`, `analyze` for the comparison)
-implements this file exactly. The six recordings are made and fingerprinted (28 Oct), and one
-smoke session per agent passed on the session host (3 Nov, see "Changes"). Nothing is left
-before the lock.
+implements this file exactly. The six recordings are made and fingerprinted (28 Oct). Left
+before the lock: one smoke session per agent on the commit that will be tagged, because the
+3 Nov cooldown fix changes the agent (see "Changes"); that same commit is then tagged.
 
 ## Question and hypotheses
 
@@ -261,7 +261,7 @@ same seed.
 
 ### Accepted 3 Nov (Nour and Shahesta), before any scored session
 
-**Smoke sessions.** One unscored session per agent, 1 round of the two seen faults
+**Smoke sessions (on `e5c89e5`, superseded, see the cooldown below).** One unscored session per agent, 1 round of the two seen faults
 (`CHAOS_FAULTS=bad_release_worker,db_lock`) on seed 101, on an on-demand g4dn.xlarge in
 eu-north-1 (code identical to commit `e5c89e5`, checked file by file). The six seeds were rebuilt
 on the host from the bucket's hourly files and all six SHA-256 match the table below. Both
@@ -296,9 +296,32 @@ from 1/2 to 2/2 faults resolved autonomously for each agent; neither had a harmf
 Tests: `test_score.py`. This change was motivated by the smoke sessions, which are not scored,
 and made before any scored session.
 
-**Session hosts:** the code must be a `git clone` at the tag, so the header records the commit.
-Session folders are ignored by git (`testbed/.gitignore`), so a finished session does not mark
+**The cooldown no longer has a hole (found by Shahesta's second review, both agents).** An
+alert arriving during an investigation was queued and handled straight after it, before the
+180 s cooldown began: in the rule smoke session the first db_lock incident escalated after a
+160 s investigation, and the duplicate queued during it opened 1 s later and acted 20 s after
+the escalation. Now the agent is busy from the
+moment it accepts an alert until the cooldown after that incident ends; alerts in that time are
+dropped, as the cooldown always intended, and a crashed investigation also starts the cooldown.
+The decision logic is unchanged. Tests: `test_agent_cooldown.py`. Because this changes the
+agent, the 3 Nov smoke sessions above do not stand for the tagged commit: one smoke session per
+agent is re-run on it before the tag.
+
+**Raw incident files of the 3 Nov smoke sessions** (checked because the scorer's
+`resolved_autonomously` depends on `verification.recovered`): every action recovered and none
+was reverted. Rule: db_lock escalated, then its duplicate acted (recovered); bad_release acted
+(recovered). LLM: db_lock acted (recovered); bad_release escalated proposing `none`, then its
+duplicate 5 min later rolled back (recovered).
+
+**Session hosts:** the code must be a `git clone` at the tag. `run-session.sh` refuses to start
+if git cannot report a commit, and `score analyze` rejects a session whose header has no
+`git_commit`. All of `testbed/sessions/` is ignored by git, so a finished session does not mark
 the next one as having uncommitted changes.
+
+**The 70 recorded hours:** 59 are in the shared bucket (the hours the session host rebuilds the
+seeds from); 11 (24 Oct 09:00 → 19:59 UTC) were recorded in Nour's own AWS account and exist
+only on her laptop since that account was closed. They change no assignment: no seed window
+falls on 24 Oct, and none of them could form an earlier qualifying window for any start hour.
 
 ### Accepted 19 Oct (Nour), before any scored session
 

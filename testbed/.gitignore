@@ -6,5 +6,4 @@ incidents/*
 .env
 # session results go to the bucket, not git: a tracked results folder would mark the next
 # session's header as having uncommitted changes
-sessions/*
-!sessions/.gitkeep
+sessions/
