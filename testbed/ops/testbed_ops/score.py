@@ -408,13 +408,18 @@ def always_escalate(incidents: list[dict], m: Match, human_min: float = HUMAN_MI
 
 
 def per_fault(incidents: list[dict], m: Match) -> list[dict]:
-    """One outcome per injected fault, in injection order. A missed fault was neither
-    resolved nor harmed."""
-    by_fault = {f.fault_id: verdict(next(r for r in incidents if r["id"] == i), f)
-                for i, f in m.scored.items()}
-    return [{"fault": f.fault, **({"resolved": by_fault[f.fault_id]["resolved_autonomously"],
-                                   "harmful": by_fault[f.fault_id]["harmful_autonomous"]}
-                                  if f.fault_id in by_fault else {"resolved": False, "harmful": False})}
+    """One outcome per injected fault, in injection order. Every incident on the fault counts
+    (the scored one and its duplicates, Changes 3 Nov): the fault is harmful if any of them
+    took a wrong action on its own authority, and resolved if any of them fixed it with no
+    human. The fault stays the unit, so the pairs and the power analysis are unchanged. A
+    missed fault was neither resolved nor harmed."""
+    by_id = {r["id"]: r for r in incidents}
+    on_fault: dict[str, list[dict]] = {}
+    for iid, f in [*m.scored.items(), *m.duplicate_of.items()]:
+        on_fault.setdefault(f.fault_id, []).append(verdict(by_id[iid], f))
+    return [{"fault": f.fault,
+             "resolved": any(v["resolved_autonomously"] for v in on_fault.get(f.fault_id, [])),
+             "harmful": any(v["harmful_autonomous"] for v in on_fault.get(f.fault_id, []))}
             for f in m.faults]
 
 

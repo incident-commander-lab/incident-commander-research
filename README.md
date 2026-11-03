@@ -198,6 +198,29 @@ what next.
 - **Blocked on:** anything waiting for the other person or for something outside.
 - If the overall plan changed, update "Remaining overall" below the entries.
 
+### 3 Nov 2026, Nour
+
+**Done** (PR #8, branch `eval/rq3-recordings`):
+- The six seed recordings (28 Oct): windows, event counts, max gaps and SHA-256 in
+  `RQ3_PROTOCOL.md`. Rebuilt on the session host from the bucket: all six SHA-256 match.
+- Smoke sessions passed (3 Nov, Shahesta's on-demand g4dn): rule and LLM agent, 2 seen faults
+  each, 0 inject failures, headers and reports complete.
+- Test bed fixes found by the laptop attempts (1 Nov): clean state at every session start, the
+  injector stays up after its last slot, the answer key is always copied, atomic release
+  files, and `run-session.sh` on Windows.
+- Scorer: every incident on a fault now counts for H3a/H3b, the fault staying the unit
+  (Shahesta's proposal, accepted in "Changes"). `testbed/sessions/` is ignored by git.
+
+**Next, Shahesta:**
+1. Review and merge PR #8, tag `rq3-protocol-locked`.
+2. Start the pilot host as a `git clone` at the tag (about 9 h for two sessions).
+
+**Next, Nour:**
+1. Pilot: seeds 101–102, both agents (A-B-B-A), then check the disagreement rate.
+2. Meanwhile: the RQ2 section of Paper 1.
+
+**Blocked on:** the merge and the tag.
+
 ### 19 Oct 2026, Nour
 
 **Done** (PR #5, branch `eval/rq3-protocol-lock`, draft):
