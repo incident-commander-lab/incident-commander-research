@@ -215,17 +215,20 @@ what next.
   refuses to run without a git commit and `analyze` rejects a header without one. Because this
   changes the agent, the smoke sessions are re-run on the final commit.
 
+- Final smoke sessions on `a3131dc` passed (3 Nov): both headers at `a3131dc`, clean tree,
+  all six seeds match, cooldown held, no harmful actions. Rule 1/2 resolved, LLM 2/2; the rule
+  agent's db_lock outcome differed from the earlier run (noted in "Changes").
+
 **Next, Shahesta:**
-1. A host as a `git clone` of PR #8's head (about 3 h): one smoke session per agent.
-2. If both pass: merge PR #8 and tag `rq3-protocol-locked` on that same commit.
-3. Then the pilot host, a `git clone` at the tag (about 9 h for two sessions).
+1. Merge PR #8 (merge commit) and tag `rq3-protocol-locked` on `a3131dc` itself, not on the
+   branch head: the commits after it change documentation only.
+2. Then the pilot host, a `git clone` at the tag (about 9 h for two sessions).
 
 **Next, Nour:**
-1. Run the smoke sessions and check them; then the pilot: seeds 101–102, both agents
-   (A-B-B-A), and the disagreement rate.
+1. The pilot: seeds 101–102, both agents (A-B-B-A), and the disagreement rate.
 2. Meanwhile: the RQ2 section of Paper 1.
 
-**Blocked on:** a session host.
+**Blocked on:** the merge and the tag.
 
 ### 19 Oct 2026, Nour
 

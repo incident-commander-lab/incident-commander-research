@@ -6,9 +6,9 @@ scored session; any later change is listed under "Changes" with its date and rea
 **Status:** ready to lock (3 Nov). All open decisions are answered (see "Changes"). It is
 locked when this file is merged and tagged `rq3-protocol-locked`, before the first scored
 session. The scorer (`testbed/ops/testbed_ops/score.py`, `analyze` for the comparison)
-implements this file exactly. The six recordings are made and fingerprinted (28 Oct). Left
-before the lock: one smoke session per agent on the commit that will be tagged, because the
-3 Nov cooldown fix changes the agent (see "Changes"); that same commit is then tagged.
+implements this file exactly. The six recordings are made and fingerprinted (28 Oct). One
+smoke session per agent passed on commit `a3131dc` (3 Nov, see "Changes"); **the tag goes on
+`a3131dc` itself**, the commit those sessions ran. Commits after it change documentation only.
 
 ## Question and hypotheses
 
@@ -312,6 +312,22 @@ agent is re-run on it before the tag.
 was reverted. Rule: db_lock escalated, then its duplicate acted (recovered); bad_release acted
 (recovered). LLM: db_lock acted (recovered); bad_release escalated proposing `none`, then its
 duplicate 5 min later rolled back (recovered).
+
+**Final smoke sessions, on `a3131dc` (3 Nov, both passed).** Same setup (1 round of the two
+seen faults, seed 101, on-demand g4dn.xlarge), the host a `git clone` at `a3131dc`. Both headers:
+`git_commit` `a3131dc1c9482f0185260d24c039f561c32e7f1d`, `uncommitted_changes` false, model
+digest `500a1f06…`; the working tree was still clean at the end. All six seeds rebuilt on the
+host match the table. Each session: 2 faults injected, 0 `inject_failed`, 0 `slot_delayed`, 0
+natural incidents, a complete report; every action recovered and none was reverted. The
+cooldown held: every gap from the end of one incident to the next was over 180 s (rule 199 s
+and 278 s, LLM 291 s). Per fault: rule 1/2 resolved autonomously (bad_release resolved; db_lock
+timed out), LLM 2/2 (bad_release by a duplicate); no harmful action in either.
+- **Noted before any scored session:** the rule agent's db_lock outcome differed from the
+  `e5c89e5` run on the same seed. Here it proposed `none` (p = 0), then the correct remedy at
+  p = 0.295 and 0.183, below the 0.783 threshold, so it escalated (correctly, by its rule) and
+  the fault timed out; on `e5c89e5` its duplicate acted. The cause is not established and nothing
+  was changed for it. The pilot reports how often an agent's outcome on the same fault differs
+  between sessions.
 
 **Session hosts:** the code must be a `git clone` at the tag. `run-session.sh` refuses to start
 if git cannot report a commit, and `score analyze` rejects a session whose header has no
