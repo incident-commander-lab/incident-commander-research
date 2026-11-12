@@ -96,7 +96,7 @@ def inject(fault: str) -> dict:
     elif fault == "upstream_cut":
         env.container(EGRESS).stop(timeout=2)
     record = {"fault_id": fid, "fault": fault, "service": service, "correct_remedy": remedy}
-    STATE.write_text(json.dumps({**record, "started": env.now()}))
+    env.write_atomic(STATE, json.dumps({**record, "started": env.now()}))
     _seal({"event": "inject", **record})
     return record
 
@@ -222,7 +222,8 @@ def slots():
     """Scored sessions: a fixed schedule from CHAOS_SEED. Each slot is longer than a fault can
     last (FAULT_TIMEOUT_MIN) plus time to settle, so faults never overlap."""
     env.ensure_baseline_releases()
-    threading.Thread(target=watch_resolution, daemon=True).start()
+    watcher = threading.Thread(target=watch_resolution, daemon=True)
+    watcher.start()
     seed = int(os.environ.get("CHAOS_SEED", "0")) or 1
     slot = float(os.environ.get("CHAOS_SLOT_MIN", str(TIMEOUT_MIN + 10)))
     plan = slot_plan(seed, int(os.environ.get("CHAOS_SLOTS", "100")), _faults(), slot,
@@ -247,6 +248,9 @@ def slots():
             inject(fault)
         except Exception as e:      # a fault that cannot be injected is recorded, not silently skipped
             _seal({"event": "inject_failed", "fault": fault, "error": str(e)[:300]})
+    # stay up after the last slot: the watcher must still see the last fault resolve or time out,
+    # and exiting would make Docker restart the injector (a "restarted" schedule every minute)
+    watcher.join()
 
 
 def main(argv: list[str]):

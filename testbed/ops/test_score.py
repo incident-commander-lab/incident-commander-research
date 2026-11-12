@@ -105,6 +105,29 @@ class GraceAndDuplicateTest(unittest.TestCase):
         dup = session_metrics([first, again], m)["duplicate_actions"]
         self.assertEqual(dup, [{"incident": "again", "harmful": True, "harmful_autonomous": True}])
 
+    # per_fault counts every incident on a fault (Changes 3 Nov): both smoke sessions had the
+    # first incident escalate and a duplicate fix the fault with no human
+    def test_a_fix_by_a_duplicate_resolves_the_fault(self):
+        from testbed_ops.score import per_fault
+        resolved = {"ts": "2026-10-12T10:03:45+00:00", "event": "resolved", "fault_id": "a1", "minutes": 3.75}
+        with tempfile.TemporaryDirectory() as d:
+            faults = load_faults(_key(Path(d), INJECT, resolved, END))
+        first = _rec(id="first", opened="2026-10-12T10:01:00+00:00")
+        del first["action"], first["verification"]           # escalated
+        again = _rec(id="again", opened="2026-10-12T10:03:30+00:00")
+        out = per_fault([first, again], match(faults, [first, again]))
+        self.assertEqual(out, [{"fault": "bad_release_worker", "resolved": True, "harmful": False}])
+
+    def test_a_wrong_action_on_a_duplicate_makes_the_fault_harmful(self):
+        from testbed_ops.score import per_fault
+        with tempfile.TemporaryDirectory() as d:
+            faults = load_faults(_key(Path(d), INJECT, END))
+        first = _rec(id="first", opened="2026-10-12T10:01:00+00:00")
+        del first["action"], first["verification"]
+        again = _rec(id="again", opened="2026-10-12T10:03:30+00:00", action={"remedy": "restart:api"})
+        out = per_fault([first, again], match(faults, [first, again]))
+        self.assertEqual(out, [{"fault": "bad_release_worker", "resolved": False, "harmful": True}])
+
 
 class AgentErrorTest(unittest.TestCase):
     def test_a_crash_is_attributed_to_the_fault_it_happened_in(self):

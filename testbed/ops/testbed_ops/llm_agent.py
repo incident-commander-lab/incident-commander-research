@@ -135,7 +135,6 @@ def handle_llm(alerts: list[dict]):
     rec["llm_usage"] = dict(llm.USAGE)
     rec["seconds"] = round(time.time() - t0, 1)
     A._save(rec)
-    A._busy_until = time.time() + A.COOLDOWN_SECONDS
     return rec
 
 
