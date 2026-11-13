@@ -70,17 +70,24 @@ async function enqueue(rawData) {
 // ---------------------------------------------------------------- live mode
 async function live() {
   let lastId = null, backoff = 1000;
+  // A connection can stall silently (open, but no bytes) on some networks. The stream carries tens of
+  // events per second, so STALL_MS of silence means a stall: abort and resume from Last-Event-ID.
+  const STALL_MS = Number(process.env.STALL_MS || 15000);
   for (;;) {
+    const ac = new AbortController();
+    let lastChunk = Date.now();
+    const stallTimer = setInterval(() => { if (Date.now() - lastChunk > STALL_MS) ac.abort(new Error('stalled')); }, 1000);
     try {
       const headers = { 'User-Agent': UA, Accept: 'text/event-stream' };
       if (lastId) headers['Last-Event-ID'] = lastId;   // resume where we dropped
-      const res = await fetch(URL_, { headers });
+      const res = await fetch(URL_, { headers, signal: ac.signal });
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
       isConnected = true; connected.set({ source: 'wikipedia' }, 1); backoff = 1000;
       log('info', 'connected', { source: 'wikipedia', resume: Boolean(lastId), release: release.version });
       const feed = createSSEParser();
       const dec = new TextDecoder();
       for await (const chunk of res.body) {
+        lastChunk = Date.now();
         for (const ev of feed(dec.decode(chunk, { stream: true }))) {
           if (ev.id) lastId = ev.id;
           record(ev.data);
@@ -89,6 +96,8 @@ async function live() {
       }
       throw new Error('stream ended');
     } catch (e) {
+      clearInterval(stallTimer);
+      if (ac.signal.aborted) { log('warn', 'source stalled, reconnecting', { source: 'wikipedia', stall_ms: STALL_MS }); backoff = 1000; }
       isConnected = false; connected.set({ source: 'wikipedia' }, 0); reconnects.inc({ source: 'wikipedia' });
       log('warn', 'source disconnected', { source: 'wikipedia', error: e.message, retry_ms: backoff });
       await sleep(backoff);

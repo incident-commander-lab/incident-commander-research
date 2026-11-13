@@ -1,0 +1,24 @@
+# A replay run (cluster/load/replay/replay.py) on the ops node, hitting the ingress inside the cluster.
+# cluster/demo/demo.sh fills in NAME, MODE and the env values.
+apiVersion: batch/v1
+kind: Job
+metadata: { name: NAME, namespace: load }
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: Never
+      nodeSelector: { role: ops }
+      containers:
+        - name: replay
+          image: ic/replay:1.0.0
+          env:
+            - { name: MODE, value: "MODEVALUE" }
+            - { name: TIME_SCALE, value: "24" }
+            - { name: SCALE, value: "SCALEVALUE" }
+            - { name: MINUTES, value: "MINUTESVALUE" }
+          volumeMounts: [{ name: logs, mountPath: /logs }]
+          resources: { requests: { cpu: 100m, memory: 64Mi }, limits: { memory: 256Mi } }
+      volumes:
+        - { name: logs, configMap: { name: replay-logs } }

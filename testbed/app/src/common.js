@@ -8,10 +8,11 @@ import client from 'prom-client';
 // A "release" is the config a service was deployed with: /releases/<service>.json
 // ({ "version": "1.0.0", "env": { ... } }). Deploys and rollbacks rewrite that file and
 // restart the container, the way a config-driven deploy pipeline would. Its env
-// overrides the container's environment.
+// overrides the container's environment. In Kubernetes there is no file: the release is the
+// Deployment's environment (a rollout), and RELEASE_VERSION names it.
 export const release = (() => {
   const file = process.env.RELEASE_FILE;
-  if (!file || !fs.existsSync(file)) return { version: 'unreleased', env: {} };
+  if (!file || !fs.existsSync(file)) return { version: process.env.RELEASE_VERSION || 'unreleased', env: {} };
   const r = JSON.parse(fs.readFileSync(file, 'utf8'));
   Object.assign(process.env, r.env || {});
   return r;

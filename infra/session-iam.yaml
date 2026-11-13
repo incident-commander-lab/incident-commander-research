@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Incident Commander RQ3 session host - the role and instance profile for the GPU machine that
+  runs the Compose test bed (infra/session.sh). Read access to the recordings bucket, write access
+  only to its session-results/ prefix, Session Manager. Deploy once as root/admin in eu-north-1;
+  delete the stack to remove the permissions again (the bucket is not touched).
+
+Metadata:
+  why: >-
+    The name starts with ic-gpu so the existing ic-bench policy (ic-gpu-stockholm) may pass the role
+    to EC2 and launch the host, without ic-bench being allowed to create or edit IAM policies.
+
+Parameters:
+  Bucket:
+    Type: String
+    Default: ic-recordings-374617280285
+    Description: The recordings bucket created by the ic-nour-recording stack.
+
+Resources:
+  HostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ic-gpu-session-host
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
+      Policies:
+        - PolicyName: recordings-read-results-write
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${Bucket}
+              - Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub arn:aws:s3:::${Bucket}/*
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub arn:aws:s3:::${Bucket}/session-results/*
+      Tags: [{ Key: project, Value: incident-commander-gpu }]
+
+  HostProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: ic-gpu-session-host
+      Roles: [!Ref HostRole]
+
+Outputs:
+  Profile: { Value: !Ref HostProfile }

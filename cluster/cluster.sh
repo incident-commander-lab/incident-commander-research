@@ -43,7 +43,16 @@ up)
   ollama show qwen3:1.7b >/dev/null 2>&1 || ollama pull qwen3:1.7b
   kubectl apply -f cluster/k8s/shop.yaml >/dev/null
   (cd cluster/chaos && docker build -q -t ic/chaos:1.0.0 . >/dev/null) && k3d image import ic/chaos:1.0.0 -c "$C" >/dev/null
+  (cd cluster/load/replay && docker build -q -t ic/replay:1.0.0 . >/dev/null) && k3d image import ic/replay:1.0.0 -c "$C" >/dev/null
   kubectl create namespace load --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n load create configmap replay-logs --from-file=cluster/load/logs/ --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n load create configmap attack-payloads --from-file=cluster/load/attacks/payloads.json --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl apply -f cluster/k8s/traefik-access-log.yaml >/dev/null
+  docker build -q -t ic/pulse:1.0.0 testbed/app >/dev/null && k3d image import ic/pulse:1.0.0 -c "$C" >/dev/null
+  kubectl create namespace pulse --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n pulse create configmap pulse-db-init --from-file=init.sql=testbed/db/init.sql --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl -n pulse create configmap pulse-egress --from-file=nginx.conf=testbed/egress/nginx.conf --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+  kubectl apply -f cluster/k8s/pulse.yaml >/dev/null
   kubectl apply -f cluster/k8s/chaos.yaml >/dev/null
   docker build -q -f cluster/agent/Dockerfile -t ic/cluster-agent:1.0.0 . >/dev/null && k3d image import ic/cluster-agent:1.0.0 -c "$C" >/dev/null
   kubectl create namespace agent --dry-run=client -o yaml | kubectl apply -f - >/dev/null

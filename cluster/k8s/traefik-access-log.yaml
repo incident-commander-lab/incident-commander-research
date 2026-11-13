@@ -1,0 +1,10 @@
+# k3s's bundled Traefik with its access log on (stdout, common format): what the attack_signature
+# check reads. k3s's helm controller applies this to its own traefik chart.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata: { name: traefik, namespace: kube-system }
+spec:
+  valuesContent: |-
+    logs:
+      access:
+        enabled: true

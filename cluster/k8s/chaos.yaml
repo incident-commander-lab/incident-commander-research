@@ -19,6 +19,7 @@ kind: Role
 metadata: { name: chaos-shop, namespace: shop }
 rules:
   - { apiGroups: [apps], resources: [deployments], verbs: [get, list, patch] }
+  - { apiGroups: [traefik.io], resources: [ingressroutes], verbs: [get, list] }   # attack_burst: is a client blocked?
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -37,6 +38,26 @@ kind: RoleBinding
 metadata: { name: chaos-load, namespace: load }
 subjects: [{ kind: ServiceAccount, name: chaos, namespace: chaos }]
 roleRef: { kind: Role, name: chaos-load, apiGroup: rbac.authorization.k8s.io }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: pulse }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: { name: chaos-pulse, namespace: pulse }
+rules:   # Pulse's faults: releases, scaling, freezing a process, the maintenance job holding a lock
+  - { apiGroups: [apps], resources: [deployments], verbs: [get, list, patch] }
+  - { apiGroups: [apps], resources: [deployments/scale], verbs: [get, patch, update] }
+  - { apiGroups: [""], resources: [pods], verbs: [get, list] }
+  - { apiGroups: [""], resources: [pods/exec], verbs: [create, get] }
+  - { apiGroups: [batch], resources: [jobs], verbs: [get, list, create, delete] }
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: { name: chaos-pulse, namespace: pulse }
+subjects: [{ kind: ServiceAccount, name: chaos, namespace: chaos }]
+roleRef: { kind: Role, name: chaos-pulse, apiGroup: rbac.authorization.k8s.io }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -58,6 +79,7 @@ spec:
           env:
             - { name: FAULT_TIMEOUT_MIN, value: "15" }
             - { name: SURGE_USERS, value: "150" }
+            - { name: REPLAY_IMAGE, value: "ic/replay:1.0.0" }   # attack_burst's attacker (cluster/load/replay)
             - { name: CHAOS_GPU_NUM_CTX, value: "16384" }   # local cap; larger on the AWS GPU
             - { name: CHAOS_SEED, value: "0" }
           volumeMounts: [{ name: sealed, mountPath: /sealed }]

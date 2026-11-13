@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Incident Commander mentor-scale test bed - three Spot machines in eu-north-1 forming one k3s cluster
+  Incident Commander mentor-scale test bed - three machines in eu-north-1 (GPU on Spot, ops and apps on-demand by default) forming one k3s cluster
   (ops - apps - gpu). No inbound access from the internet (default security group - members only),
   Session Manager for shells, and every machine terminates itself after SessionHours.
   Spec - .plans/mentor-scale-testbed-spec.md - driven by infra/gpu.sh.
@@ -8,7 +8,7 @@ Description: >-
 Metadata:
   why: >-
     One AZ (g6 is offered in eu-north-1a and 1b only) avoids cross-AZ charges; Spot because the account's
-    GPU quota is Spot-only; self-termination so a forgotten session cannot spend credits.
+    GPU quota is Spot-only (ops and apps on-demand, CoreMarket); self-termination so a forgotten session cannot spend credits.
 
 Parameters:
   SessionHours:
@@ -33,12 +33,22 @@ Parameters:
     Default: g6.xlarge
     AllowedValues: [g6.xlarge, g5.xlarge, g4dn.xlarge]
     Description: GPU machine (Spot capacity varies; gpu.sh tries g6, then g5, then g4dn).
+  CoreMarket:
+    Type: String
+    Default: ondemand
+    AllowedValues: [ondemand, spot]
+    Description: >-
+      ops and apps machines. On-demand by default - Spot reclaimed the apps machine mid-session on
+      21 Oct; the GPU stays Spot (the account's GPU quota is Spot-only).
   GpuAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/deeplearning/ami/x86_64/base-oss-nvidia-driver-gpu-ubuntu-24.04/latest/ami-id
   UbuntuAmi:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+Conditions:
+  SpotCore: !Equals [!Ref CoreMarket, spot]
 
 Resources:
   Role:
@@ -77,10 +87,27 @@ Resources:
           - ResourceType: volume
             Tags: [{ Key: project, Value: incident-commander-gpu }]
 
+  CoreTemplate:   # the same without Spot: ops and apps when CoreMarket=ondemand
+    Type: AWS::EC2::LaunchTemplate
+    Properties:
+      LaunchTemplateData:
+        IamInstanceProfile: { Arn: !GetAtt Profile.Arn }
+        InstanceInitiatedShutdownBehavior: terminate
+        MetadataOptions: { HttpTokens: required, HttpEndpoint: enabled }
+        SecurityGroupIds: [!Ref SecurityGroupId]
+        TagSpecifications:
+          - ResourceType: instance
+            Tags: [{ Key: project, Value: incident-commander-gpu }, { Key: stack, Value: !Ref AWS::StackName }]
+          - ResourceType: volume
+            Tags: [{ Key: project, Value: incident-commander-gpu }]
+
   Ops:
     Type: AWS::EC2::Instance
     Properties:
-      LaunchTemplate: { LaunchTemplateId: !Ref Template, Version: !GetAtt Template.LatestVersionNumber }
+      LaunchTemplate: !If
+        - SpotCore
+        - { LaunchTemplateId: !Ref Template, Version: !GetAtt Template.LatestVersionNumber }
+        - { LaunchTemplateId: !Ref CoreTemplate, Version: !GetAtt CoreTemplate.LatestVersionNumber }
       InstanceType: t3.large
       CreditSpecification: { CPUCredits: standard }
       ImageId: !Ref UbuntuAmi
@@ -107,7 +134,10 @@ Resources:
   Apps:
     Type: AWS::EC2::Instance
     Properties:
-      LaunchTemplate: { LaunchTemplateId: !Ref Template, Version: !GetAtt Template.LatestVersionNumber }
+      LaunchTemplate: !If
+        - SpotCore
+        - { LaunchTemplateId: !Ref Template, Version: !GetAtt Template.LatestVersionNumber }
+        - { LaunchTemplateId: !Ref CoreTemplate, Version: !GetAtt CoreTemplate.LatestVersionNumber }
       InstanceType: m7i.xlarge
       ImageId: !Ref UbuntuAmi
       SubnetId: !Ref SubnetId
@@ -142,9 +172,10 @@ Resources:
           mkdir -p /etc/rancher/k3s
           printf 'mirrors:\n  "registry.ic.local:5000":\n    endpoint: ["http://%s:5000"]\n' "${Ops.PrivateIp}" > /etc/rancher/k3s/registries.yaml
           until curl -sk https://${Ops.PrivateIp}:6443/ping >/dev/null; do sleep 10; done
-          # the DLAMI ships the NVIDIA driver and container toolkit; k3s detects the nvidia runtime at start
+          # the DLAMI ships the NVIDIA driver and container toolkit; k3s detects the nvidia runtime at start.
+          # gpu.present: the device-plugin chart only schedules on nodes with that label (no NFD here)
           curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION=v1.31.5+k3s1 K3S_URL=https://${Ops.PrivateIp}:6443 \
-            K3S_TOKEN='${K3sToken}' sh -s - agent --node-label role=gpu
+            K3S_TOKEN='${K3sToken}' sh -s - agent --node-label role=gpu --node-label nvidia.com/gpu.present=true
 
 Outputs:
   OpsId: { Value: !Ref Ops }

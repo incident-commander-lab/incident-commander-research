@@ -18,6 +18,51 @@ prometheus-node-exporter:
 serverFiles:
   alerting_rules.yml:
     groups:
+      - name: pulse      # testbed/prometheus/alerts.yml, unchanged except ComponentDown's labels
+        rules:
+          - alert: SourceDisconnected
+            expr: max by (source) (pulse_source_connected) == 0
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "Collector lost the {{ $labels.source }} stream" }
+          - alert: IngestStalled
+            expr: sum(rate(pulse_events_processed_total[2m])) == 0 and sum(rate(pulse_events_received_total[2m])) > 0
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "Events arrive but nothing is being stored" }
+          - alert: WorkerLagHigh
+            expr: pulse_stream_lag > 5000
+            for: 3m
+            labels: { severity: page }
+            annotations: { summary: "Worker is {{ $value }} events behind" }
+          - alert: DataStale
+            expr: time() - max(pulse_source_last_event_timestamp_seconds) > 300
+            labels: { severity: page }
+            annotations: { summary: "No new events for 5 minutes" }
+          - alert: ApiErrorRateHigh
+            expr: sum(rate(pulse_http_requests_total{status=~"5.."}[5m])) / clamp_min(sum(rate(pulse_http_requests_total[5m])), 1e-9) > 0.05
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "API 5xx rate above 5%" }
+          - alert: ApiLatencyHigh
+            expr: histogram_quantile(0.95, sum by (le) (rate(pulse_http_request_seconds_bucket[5m]))) > 1
+            for: 3m
+            labels: { severity: page }
+            annotations: { summary: "API p95 latency above 1s" }
+          - alert: DbWriteErrors
+            expr: increase(pulse_db_errors_total[5m]) > 0
+            labels: { severity: page }
+            annotations: { summary: "Worker failing to write to Postgres" }
+          - alert: RedisMemoryHigh
+            expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.8
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "Redis above 80% of maxmemory" }
+          - alert: ComponentDown
+            expr: up{namespace="pulse"} == 0 or absent(up{namespace="pulse",app="api"})
+            for: 1m
+            labels: { severity: page }
+            annotations: { summary: "{{ $labels.app }} is not answering scrapes" }
       - name: shop
         rules:
           - alert: ShopSlow
@@ -35,6 +80,11 @@ serverFiles:
             for: 2m
             labels: { severity: page }
             annotations: { summary: "more than 5% errors from {{ $labels.service }}" }
+          - alert: ShopClientErrors   # many refused or not-found requests: broken links, scans, attacks
+            expr: sum(rate(traefik_service_requests_total{service=~"shop-juice-shop.*",code=~"4.."}[2m])) / sum(rate(traefik_service_requests_total{service=~"shop-juice-shop.*"}[2m])) > 0.2
+            for: 2m
+            labels: { severity: page }
+            annotations: { summary: "more than 20% of the shop's requests answered 4xx" }
           - alert: PodRestarting
             expr: increase(kube_pod_container_status_restarts_total{namespace="shop"}[5m]) > 0
             labels: { severity: page }

@@ -55,4 +55,140 @@ def test_metric_labels():
     assert P._lbl_change(json.dumps({"revisions": [[1, "2026-10-18T09:50:00Z"]], "now": now}), "x") == "unchanged"
     assert P._lbl_change(json.dumps({"revisions": [[3, "2026-10-18T08:00:00Z"]], "now": now}), "x") == "unchanged"
     for name, t in P.TEMPLATES.items():   # the rule relies on the last outcome being the healthy one
-        assert t.outcomes[-1] in ("healthy", "ready", "has_endpoints", "ports_ok", "none", "clean", "ok", "unchanged"), name
+        assert t.outcomes[-1] in ("healthy", "ready", "has_endpoints", "ports_ok", "none", "clean", "ok", "unchanged",
+                                  "flowing", "connected", "clear"), name   # Pulse names, as in Compose
+
+
+def test_assistant_dead_model_address_reads_as_connection_errors():
+    # 21 Oct shakedown: a wrong model address fails fast and, before the assistant logged the reason,
+    # left only "503" access lines (log_signature=clean). Its own error line must read as the cause.
+    from ic.bench.probes import label_log_signature
+    src = open(os.path.join(ROOT, "cluster/assistant/app.py")).read()
+    assert 'log.error("upstream unreachable: %s: %s (%s)"' in src
+    line = ("2026-10-21 08:01:02,123 ERROR assistant: upstream unreachable: ConnectError: "
+            "[Errno -2] Name or service not known (http://model-gateway.ai.svc:11434/api/chat)")
+    access = 'INFO:     10.42.0.9:51234 - "POST /assistant/ask HTTP/1.1" 503 Service Unavailable'
+    assert label_log_signature("\n".join([line, access] * 10), "assistant") == "connection_errors"
+    assert label_log_signature("\n".join([access] * 20), "assistant") == "clean"
+
+
+def test_plain_llm_agent_runs_checks_then_acts_through_the_shared_safety_net(monkeypatch, tmp_path):
+    # RQ3 setup 2 on the cluster: the LLM picks checks and the fix; OPA, threshold and verification are shared
+    from ic_cluster import agent as A, llm_agent as L, probes
+    monkeypatch.setattr(A, "OUT", tmp_path)
+    monkeypatch.setattr(A, "AUTONOMY", "act")
+    monkeypatch.setattr(probes, "run", lambda p: ("raw", "errors" if p.key == "error_rate:assistant" else p.outcomes[-1]))
+    replies = iter([L._Step(thought="t", next="check", check="error_rate:assistant"),
+                    L._Step(thought="t", next="check", check="error_rate:assistant"),   # repeat: handed back, not re-run
+                    L._Step(thought="t", next="decide", service="assistant", cause="bad release",
+                            remedy="rollout_undo:assistant", confidence=0.9)])
+    monkeypatch.setattr(L.llm, "json_call", lambda *a, **k: next(replies))
+    acted = []
+    monkeypatch.setattr(A, "_act", lambda rec, remedy, p, pr, approved: acted.append((remedy, p)))
+    rec = L.handle_llm([{"name": "ShopErrors", "summary": "assistant 5xx"}])
+    assert rec["agent_kind"] == "llm" and rec["investigation"]["checks_paid"] == 1
+    assert rec["investigation"]["errors"] == ["repeated check error_rate:assistant"]
+    assert rec["diagnosis"]["decision"] == "act" and acted == [("rollout_undo:assistant", 0.9)]
+    assert (tmp_path / f"{rec['id']}.json").exists()
+    assert A.PLATFORM in L._system(probes.instances()) and A.SYMPTOMS in L._system(probes.instances())
+
+
+def test_rule_and_llm_agents_are_told_the_same_about_the_system():
+    from ic_cluster import agent as A, llm_agent as L, probes
+    pr = probes.instances()
+    for text in (A.PLATFORM, A.SYMPTOMS):
+        assert text in A._system(pr) and text in L._system(pr)
+
+
+def test_attack_signature_reads_traefik_access_logs(monkeypatch):
+    from ic_cluster import probes
+    attack = '10.42.0.31 - - [22/Oct/2026:20:01:02 +0000] "GET /rest/products/search?q=%27%20OR%201%3D1--%20 HTTP/1.1" 500 12 "-" "scan/1.0" 41 "shop-juice-shop@kubernetes" "http://10.42.1.5:3000" 3ms'
+    trav = '10.42.0.31 - - [22/Oct/2026:20:01:03 +0000] "GET /ftp/..%2F..%2Fetc%2Fpasswd HTTP/1.1" 403 12 "-" "scan/1.0" 42 "shop-juice-shop@kubernetes" "http://10.42.1.5:3000" 2ms'
+    user = '10.42.0.20 - - [22/Oct/2026:20:01:03 +0000] "GET /rest/products/search?q=apple HTTP/1.1" 200 900 "-" "Mozilla" 43 "shop-juice-shop@kubernetes" "http://10.42.1.5:3000" 9ms'
+    blocked = attack.replace("shop-juice-shop@kubernetes", "shop-ic-block-10-42-0-31@kubernetescrd")
+    monkeypatch.setattr(probes, "_sh", lambda cmd, timeout=30: "\n".join([attack] * 15 + [trav] * 10 + [user] * 40))
+    p = probes.instances()["attack_signature:juice-shop"]
+    raw, label = probes.run(p)
+    assert label == "attack" and json.loads(raw)["top_client"] == "10.42.0.31" and probes.LAST_ATTACKER["ip"] == "10.42.0.31"
+    assert p.template.cost == 2.0
+    monkeypatch.setattr(probes, "_sh", lambda cmd, timeout=30: "\n".join([blocked] * 50 + [user] * 40))
+    assert probes.run(p)[1] == "clean"               # requests our block answered are not a new attack
+    monkeypatch.setattr(probes, "_sh", lambda cmd, timeout=30: "")
+    assert probes.run(p)[1] is None                  # no access log: unreadable, not evidence
+
+
+def test_block_client_needs_an_identified_attacker_and_a_human(monkeypatch):
+    from ic_cluster import actions, probes
+    probes.LAST_ATTACKER.clear()
+    with pytest.raises(RuntimeError):
+        actions.execute("block_client", reason="test")
+    applied, deleted = [], []
+    probes.LAST_ATTACKER.update(ip="10.42.0.31")
+    monkeypatch.setattr(actions, "_apply", lambda m: applied.append(m))
+    monkeypatch.setattr(actions, "_k", lambda *a: deleted.append(a) if a[0] == "delete" else "rancher/mirrored-library-traefik:2.11.18")
+    undo = actions.execute("block_client", reason="incident x")
+    route = applied[1]["spec"]["routes"][0]
+    assert applied[0]["spec"] == {"ipWhiteList": {"sourceRange": ["127.0.0.1/32"]}}
+    assert route["match"] == "ClientIP(`10.42.0.31`)" and route["middlewares"] == [{"name": "ic-deny-all"}]
+    undo()
+    assert deleted and deleted[0][:2] == ("delete", "ingressroute.traefik.io")
+    policy = open(os.path.join(ROOT, "cluster/agent/policy.rego")).read()
+    assert 'input.action == "block_client"' in policy and "not input.approved" in policy
+
+
+def _agent_view(apps: str) -> dict:
+    """What the agent knows under APPS=<apps> (module-level settings, so in a fresh interpreter)."""
+    import subprocess
+    code = ("import json; from ic_cluster import agent as A, actions, probes; "
+            "print(json.dumps({'platform': A.PLATFORM, 'services': list(probes.APPLIES), "
+            "'remedies': sorted(actions.CATALOG), 'checks': sorted(probes.instances())}))")
+    env = {**os.environ, "APPS": apps, "PYTHONPATH": os.pathsep.join([os.path.join(ROOT, "cluster", "agent"), ROOT])}
+    return json.loads(subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True).stdout)
+
+
+def test_shop_only_agent_is_unchanged_by_pulse():
+    v = _agent_view("shop")
+    assert v["services"] == ["juice-shop", "assistant"]
+    assert v["platform"].startswith("a web\nshop running on Kubernetes") and "pulse" not in v["platform"].lower()
+    assert not any(r.endswith((":worker", ":collector", ":api", ":postgres", ":redis")) for r in v["remedies"])
+
+
+def test_pulse_in_the_cluster_has_its_checks_and_fixes():
+    v = _agent_view("shop,pulse")
+    assert v["services"] == ["juice-shop", "assistant", "collector", "worker", "api", "redis", "postgres"]
+    for r in ("rollout_undo:worker", "rollout_undo:collector", "restart:worker", "restart:collector", "scale_out:api",
+              "kill_blocking_sessions:postgres", "restore_redis_maxmemory:redis", "block_client"):
+        assert r in v["remedies"], r
+    for c in ("throughput:worker", "stream_lag:worker", "source_connected:collector", "db_locks:postgres",
+              "redis_memory:redis", "endpoints:api", "log_signature:worker"):
+        assert c in v["checks"], c
+    assert "endpoints:worker" not in v["checks"]          # no Service object: the check would always say "none"
+    assert "data pipeline" in v["platform"] and "web\nshop" in v["platform"]
+    policy = open(os.path.join(ROOT, "cluster/agent/policy.rego")).read()
+    assert all(f'"{r}"' in policy for r in v["remedies"] if r != "none")
+
+
+def test_every_pulse_fault_has_a_fix_the_agent_can_take():
+    import ast
+    src = open(os.path.join(ROOT, "cluster/chaos/chaos.py")).read()
+    faults = ast.literal_eval(src[src.index("FAULTS = {") + len("FAULTS = "):src.index("\n}\n", src.index("FAULTS = {")) + 2])
+    remedies = _agent_view("shop,pulse")["remedies"]
+    for f, (svc, remedy, also) in faults.items():
+        assert remedy in remedies, (f, remedy)
+
+
+def test_attack_pattern_recall_and_no_false_alarms():
+    # measured 23 Oct: the first pattern matched only 26% of the attack lines on AWS (missed the attack)
+    import re as _re
+    sys.path.insert(0, os.path.join(ROOT, "cluster", "load", "replay"))
+    import replay
+    from ic_cluster import probes as P
+    d = json.load(open(os.path.join(ROOT, "cluster/load/attacks/payloads.json")))["payloads"]
+    lines = [p for m, p, b in replay._attack_requests(d) if m == "GET"]          # POST bodies never reach the access log
+    recall = sum(bool(P.ATTACK_RX.search(P._decoded(p))) for p in lines) / len(lines)
+    assert recall >= 0.95, recall
+    src = open(os.path.join(ROOT, "cluster/load/locustfile.py")).read()
+    terms = [t.strip().strip("\"'") for t in _re.search(r"SEARCH_TERMS\s*=\s*\[(.*?)\]", src, _re.S).group(1).split(",") if t.strip()]
+    pick = replay._paths([{"id": i, "image": f"{n}.jpg"} for i, n in enumerate(["apple_juice", "carrot_juice", "3d_keychain"], 1)])
+    normal = [pick[c]() for c in pick for _ in range(200)] + [f"/rest/products/search?q={w}" for w in terms + replay.WORDS]
+    assert not [p for p in normal if P.ATTACK_RX.search(P._decoded(p))]

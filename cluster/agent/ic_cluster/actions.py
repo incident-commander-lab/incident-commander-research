@@ -7,6 +7,7 @@ import json
 import subprocess
 from typing import Callable, Optional
 
+from . import probes
 from .probes import KUBECTL, NAMESPACE
 
 MAX_REPLICAS = 3
@@ -22,6 +23,23 @@ CATALOG = {
     "block_client": (True, "Temporarily block one client address at the ingress (always needs human approval)"),
     "none": (True, "No action"),
 }
+_PULSE = {   # Pulse in the cluster (testbed_ops/actions.py, in Kubernetes terms)
+    "rollout_undo:worker": (True, "Roll the worker back to its previous release"),
+    "rollout_undo:collector": (True, "Roll the collector back to its previous release"),
+    "restart:worker": (True, "Restart the worker's pod (rolling)"),
+    "restart:collector": (True, "Restart the collector's pod"),
+    "restart:api": (True, "Restart the API's pods (rolling)"),
+    "scale_out:api": (True, "Add one API replica (max 3); brings a scaled-down API back"),
+    "kill_blocking_sessions:postgres": (True, "Terminate Postgres sessions that block others (their open transaction rolls back; no data is lost)"),
+    "restore_redis_maxmemory:redis": (True, "Set Redis maxmemory back to its baseline (256 MB)"),
+}
+_SHOP = {k for k in CATALOG if k.split(":")[-1] in ("juice-shop", "assistant") or k == "block_client"}
+if "pulse" in probes.APPS:
+    CATALOG.update(_PULSE)
+if "shop" not in probes.APPS:
+    for k in _SHOP:
+        CATALOG.pop(k)
+REDIS_BASELINE = str(256 * 1024 * 1024)
 
 
 def _k(*args: str) -> str:
@@ -44,10 +62,44 @@ def _env(svc: str) -> dict:
     return {e["name"]: e.get("value") for e in d["spec"]["template"]["spec"]["containers"][0].get("env", [])}
 
 
+def _apply(manifest: dict):
+    r = subprocess.run([KUBECTL, "apply", "-f", "-"], input=json.dumps(manifest), capture_output=True, text=True, timeout=60)
+    if r.returncode != 0:
+        raise RuntimeError(f"kubectl apply: {r.stderr.strip()[:300]}")
+
+
+def _block(ip: str, reason: str) -> Callable[[], None]:
+    """Answer every request from one client address with 403 at the ingress: a Traefik route matching
+    that client (above every other route) through an allow-list that admits nobody."""
+    name = "ic-block-" + ip.replace(".", "-").replace(":", "-")
+    meta = {"namespace": "shop", "labels": {"incident-commander": "block"},
+            "annotations": {"incident-commander/reason": reason[:200]}}
+    image = _k("get", "deploy", "traefik", "-n", "kube-system", "-o", "jsonpath={.spec.template.spec.containers[0].image}")
+    allow = "ipWhiteList" if image.rsplit(":", 1)[-1].lstrip("v").startswith("2.") else "ipAllowList"   # renamed in Traefik 3
+    _apply({"apiVersion": "traefik.io/v1alpha1", "kind": "Middleware", "metadata": {"name": "ic-deny-all", **meta},
+            "spec": {allow: {"sourceRange": ["127.0.0.1/32"]}}})
+    _apply({"apiVersion": "traefik.io/v1alpha1", "kind": "IngressRoute", "metadata": {"name": name, **meta},
+            "spec": {"entryPoints": ["web"], "routes": [{
+                "match": f"ClientIP(`{ip}`)", "kind": "Rule", "priority": 100000,
+                "middlewares": [{"name": "ic-deny-all"}], "services": [{"name": "juice-shop", "port": 3000}]}]}})
+    return lambda: _k("delete", "ingressroute.traefik.io", name, "-n", "shop", "--ignore-not-found")
+
+
 def execute(remedy: str, reason: str) -> Optional[Callable[[], None]]:
     """Run a remedy. Returns a function that undoes it, or None."""
     kind, _, svc = remedy.partition(":")
     ns = NAMESPACE.get(svc, "")
+    if kind == "kill_blocking_sessions":
+        out = _k("exec", "-n", ns, "deploy/postgres", "--", "psql", "-U", "pulse", "-d", "pulse", "-tAc",
+                 "SELECT pid, application_name, pg_terminate_backend(pid) FROM pg_stat_activity WHERE pid IN "
+                 "(SELECT unnest(pg_blocking_pids(pid)) FROM pg_stat_activity WHERE wait_event_type = 'Lock')")
+        if not out.strip():
+            raise RuntimeError("no session is blocking another")
+        return None                    # a terminated session cannot be brought back (its transaction rolled back)
+    if kind == "restore_redis_maxmemory":
+        before = _k("exec", "-n", ns, "deploy/redis", "--", "redis-cli", "config", "get", "maxmemory").split()[-1]
+        _k("exec", "-n", ns, "deploy/redis", "--", "redis-cli", "config", "set", "maxmemory", REDIS_BASELINE)
+        return lambda: _k("exec", "-n", ns, "deploy/redis", "--", "redis-cli", "config", "set", "maxmemory", before)
     if kind == "scale_out":
         n = _replicas(svc)
         if n >= MAX_REPLICAS:
@@ -71,8 +123,11 @@ def execute(remedy: str, reason: str) -> Optional[Callable[[], None]]:
     if kind == "restart":
         _k("rollout", "restart", "deploy", svc, "-n", ns)
         return None
-    if kind == "block_client":
-        raise RuntimeError("block_client is proposed to a human, never executed by the agent (week 2: ingress deny list)")
+    if kind == "block_client":         # runs only after a human approved it (OPA)
+        ip = probes.LAST_ATTACKER.get("ip")
+        if not ip:
+            raise RuntimeError("no attacking client identified (attack_signature has not read 'attack')")
+        return _block(ip, f"{reason}: {probes.LAST_ATTACKER}")
     if kind == "none":
         return None
     raise ValueError(f"unknown remedy {remedy}")

@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Incident Commander RQ3 recorder - one small on-demand machine in eu-north-1 that records the live
+  Wikimedia stream for the replay seeds. No inbound access (default security group - members only),
+  Session Manager for shells. Shutting down stops it (disk and recordings kept). Driven by infra/record.sh.
+
+Metadata:
+  why: >-
+    On-demand, not Spot - a 30 h recording must not be interrupted. Tagged incident-commander-gpu (both tags are in the collaborator policy) so a
+    collaborator with infra/collaborator-policy.json can start, stop and use it without creating anything.
+
+Parameters:
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  SecurityGroupId:
+    Type: AWS::EC2::SecurityGroup::Id
+  IdleStopHours:
+    Type: Number
+    Default: 12
+    Description: Backstop - the machine stops itself after this many hours unless a recording sets its own stop time.
+  UbuntuAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+
+Resources:
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
+      Tags: [{ Key: project, Value: incident-commander-gpu }]
+
+  Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${AWS::StackName}-profile
+      Roles: [!Ref Role]
+
+  Recorder:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.medium
+      CreditSpecification: { CPUCredits: standard }
+      ImageId: !Ref UbuntuAmi
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds: [!Ref SecurityGroupId]
+      IamInstanceProfile: !Ref Profile
+      InstanceInitiatedShutdownBehavior: stop
+      MetadataOptions: { HttpTokens: required, HttpEndpoint: enabled }
+      BlockDeviceMappings: [{ DeviceName: /dev/sda1, Ebs: { VolumeSize: 40, VolumeType: gp3, DeleteOnTermination: true } }]
+      Tags:
+        - { Key: Name, Value: !Ref AWS::StackName }
+        - { Key: project, Value: incident-commander-gpu }
+        - { Key: role, Value: recorder }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -ux
+          shutdown -h +$(( ${IdleStopHours} * 60 )) "idle backstop - record.sh start sets the real stop time"
+          apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io docker-compose-v2 docker-buildx >/dev/null
+          usermod -aG docker ubuntu
+          touch /var/lib/ic-recorder-ready
+
+Outputs:
+  InstanceId: { Value: !Ref Recorder }

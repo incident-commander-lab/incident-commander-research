@@ -1,0 +1,155 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  Nour's RQ3 recording setup in eu-north-1 - a private S3 bucket for the recordings, the ic-rec-host
+  role for the recording server (write-only to that bucket + Session Manager), and a policy on the
+  IAM user nourseen to launch, manage and read her own recording servers. Deploy as root/admin in
+  eu-north-1. Deleting the stack removes the role and the user policy; the bucket is retained.
+
+Metadata:
+  why: >-
+    Her request (21 Oct) with one change - she can stop, terminate and open shells only on instances
+    tagged owner=<her user name>, and that tag can only be set when she launches them. Without it,
+    Terminate/Stop/CreateTags on every instance in Stockholm would reach the GPU demo cluster.
+
+Parameters:
+  UserName:
+    Type: String
+    Default: nourseen
+
+Resources:
+  Recordings:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub ic-recordings-${AWS::AccountId}
+      PublicAccessBlockConfiguration:
+        { BlockPublicAcls: true, BlockPublicPolicy: true, IgnorePublicAcls: true, RestrictPublicBuckets: true }
+      OwnershipControls: { Rules: [{ ObjectOwnership: BucketOwnerEnforced }] }
+      BucketEncryption:
+        ServerSideEncryptionConfiguration: [{ ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 } }]
+      Tags: [{ Key: project, Value: incident-commander-bench }]
+
+  RecordingsTlsOnly:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref Recordings
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyPlainHttp
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource: [!GetAtt Recordings.Arn, !Sub "${Recordings.Arn}/*"]
+            Condition: { Bool: { aws:SecureTransport: "false" } }
+
+  HostRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ic-rec-host
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
+      Policies:
+        - PolicyName: write-recordings
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:PutObject
+                Resource: !Sub "${Recordings.Arn}/*"
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt Recordings.Arn
+      Tags: [{ Key: project, Value: incident-commander-bench }]
+
+  HostProfile:   # EC2 attaches roles through an instance profile; same name as the role
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: ic-rec-host
+      Roles: [!Ref HostRole]
+
+  UserPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: ic-nour-recording
+      Users: [!Ref UserName]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: LaunchInStockholm
+            Effect: Allow
+            Action: [ec2:RunInstances, ec2:Describe*]
+            Resource: "*"
+            Condition: { StringEquals: { aws:RequestedRegion: eu-north-1 } }
+          - Sid: OnlySmallInstances
+            Effect: Deny
+            Action: ec2:RunInstances
+            Resource: arn:aws:ec2:*:*:instance/*
+            Condition: { StringNotEquals: { ec2:InstanceType: [t3.small, t3.medium] } }
+          - Sid: LaunchedInstancesMustBeTaggedHers
+            Effect: Deny
+            Action: ec2:RunInstances
+            Resource: arn:aws:ec2:*:*:instance/*
+            Condition: { StringNotEquals: { aws:RequestTag/owner: "${aws:username}" } }
+          - Sid: TagOnlyAtLaunch
+            Effect: Allow
+            Action: ec2:CreateTags
+            Resource: "*"
+            Condition:
+              StringEquals: { aws:RequestedRegion: eu-north-1, ec2:CreateAction: RunInstances }
+          - Sid: ManageOnlyHerInstances
+            Effect: Allow
+            Action: [ec2:StartInstances, ec2:StopInstances, ec2:TerminateInstances, ec2:RebootInstances]
+            Resource: arn:aws:ec2:eu-north-1:*:instance/*
+            Condition: { StringEquals: { ec2:ResourceTag/owner: "${aws:username}" } }
+          - Sid: PassTheRecordingRole
+            Effect: Allow
+            Action: iam:PassRole
+            Resource: !GetAtt HostRole.Arn
+            Condition: { StringEquals: { iam:PassedToService: ec2.amazonaws.com } }
+          - Sid: SeeTheRecordingProfile
+            Effect: Allow
+            Action: [iam:GetInstanceProfile, iam:ListInstanceProfiles]
+            Resource: "*"
+          - Sid: ReadRecordings
+            Effect: Allow
+            Action: [s3:ListBucket, s3:GetObject]
+            Resource: [!GetAtt Recordings.Arn, !Sub "${Recordings.Arn}/*"]
+          - Sid: SeeTheBucket
+            Effect: Allow
+            Action: [s3:ListAllMyBuckets, s3:GetBucketLocation]
+            Resource: "*"
+          - Sid: ShellIntoHerInstances
+            Effect: Allow
+            Action: ssm:StartSession
+            Resource: arn:aws:ec2:eu-north-1:*:instance/*
+            Condition: { StringEquals: { ssm:resourceTag/owner: "${aws:username}" } }
+          - Sid: SessionDocuments
+            Effect: Allow
+            Action: ssm:StartSession
+            Resource:
+              - arn:aws:ssm:eu-north-1::document/SSM-SessionManagerRunShell
+              - arn:aws:ssm:eu-north-1::document/AWS-StartNonInteractiveCommand
+              - arn:aws:ssm:eu-north-1::document/AWS-StartPortForwardingSession
+          - Sid: OwnSessions
+            Effect: Allow
+            Action: [ssm:TerminateSession, ssm:ResumeSession]
+            Resource: !Sub arn:aws:ssm:*:${AWS::AccountId}:session/${!aws:username}-*
+          - Sid: SessionManagerConsole
+            Effect: Allow
+            Action: [ssm:DescribeInstanceInformation, ssm:DescribeSessions, ssm:GetConnectionStatus]
+            Resource: "*"
+          - Sid: CloudShell
+            Effect: Allow
+            Action: cloudshell:*
+            Resource: "*"
+
+Outputs:
+  Bucket: { Value: !Ref Recordings }
+  InstanceProfile: { Value: !Ref HostProfile }
